@@ -33,11 +33,7 @@ export default function AdminMonitorPage() {
     }
   }, [user, userLoading, router]);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const [convs, usersData] = await Promise.all([
@@ -50,7 +46,11 @@ export default function AdminMonitorPage() {
       console.error("Error loading monitor data:", error);
     }
     setLoading(false);
-  };
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const getUserName = (id: string) => {
     const u = allUsers.find(u => u.id === id);

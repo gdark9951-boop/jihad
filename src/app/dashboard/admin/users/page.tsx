@@ -33,16 +33,16 @@ export default function AdminUsersPage() {
     }
   }, [user, userLoading, router]);
 
-  useEffect(() => {
-    loadUsers();
-  }, []);
-
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async () => {
     setLoading(true);
     const data = await getAllUsers();
     setUsers(data);
     setLoading(false);
-  };
+  }, []);
+
+  useEffect(() => {
+    loadUsers();
+  }, [loadUsers]);
 
   const handleUpdateRole = async (userId: string, currentRole: string) => {
     const newRole = currentRole === "student" ? "professor" : "student";

@@ -60,7 +60,7 @@ export default function AdminMonitorDetailPage() {
     };
 
     if (chatId) fetchData();
-  }, [chatId]);
+  }, [chatId, router]);
 
   // المراقبة اللحظية للرسائل (Spy Mode)
   useEffect(() => {
@@ -128,11 +128,10 @@ export default function AdminMonitorDetailPage() {
         </div>
       </div>
 
-      {/* Security Warning Banner */}
       <div className="bg-amber-50 dark:bg-amber-900/10 border-b border-amber-200 dark:border-amber-900/40 p-3 flex items-center justify-center gap-3">
         <AlertTriangle className="w-4 h-4 text-amber-600" />
         <p className="text-xs text-amber-700 dark:text-amber-500 font-medium">
-          أنت الآن تشاهد المحادثة بوضع "القراءة فقط". لن يتم تسجيل دخولك ولن يظهر اسمك للمشاركين.
+          أنت الآن تشاهد المحادثة بوضع &quot;القراءة فقط&quot;. لن يتم تسجيل دخولك ولن يظهر اسمك للمشاركين.
         </p>
       </div>
 

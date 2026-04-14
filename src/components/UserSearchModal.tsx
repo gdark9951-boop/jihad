@@ -50,7 +50,7 @@ export default function UserSearchModal({
       }
 
       const usersRef = collection(db, "users");
-      // ملاحظة: Firestore لا يدعم ilike بشكل مباشر، سنقوم بالبحث بالاسم الكامل أو الفلترة محلياً للبحث المرن
+      // ملاحظة: Firestore لا يدعم البحث بالتشابه بشكل مباشر، سنقوم بالبحث بالاسم الكامل أو الفلترة محلياً للبحث المرن
       // للتبسيط الآن، سنبحث عن الدور المطلوب ونجلب عينة ثم نفلتر بالاسم
       const q = fsQuery(
         usersRef,
@@ -81,7 +81,7 @@ export default function UserSearchModal({
       console.error("Error searching users:", error);
       setSearchResults([]);
     }
-  }, [currentUser?.id]);
+  }, [currentUser?.id, currentUser?.role]);
 
   const getRoleLabel = (role: string) => {
     switch (role) {
