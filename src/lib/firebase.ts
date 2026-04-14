@@ -1,6 +1,6 @@
-import { initializeApp, getApps, FirebaseApp } from "firebase/app";
-import { getAuth, GoogleAuthProvider, Auth } from "firebase/auth";
-import { getFirestore, Firestore } from "firebase/firestore";
+import { initializeApp, getApps } from "firebase/app";
+import { getAuth, GoogleAuthProvider } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -11,56 +11,12 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
 };
 
-// Lazy singleton instances
-let _app: FirebaseApp | null = null;
-let _auth: Auth | null = null;
-let _db: Firestore | null = null;
-let _googleProvider: GoogleAuthProvider | null = null;
+// Initialize Firebase
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 
-function getApp(): FirebaseApp {
-  if (_app) return _app;
-  _app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-  return _app;
-}
+export const auth = getAuth(app);
+export const db = getFirestore(app);
+export const googleProvider = new GoogleAuthProvider();
 
-function getLazyAuth(): Auth {
-  if (_auth) return _auth;
-  _auth = getAuth(getApp());
-  _auth.languageCode = 'ar';
-  return _auth;
-}
-
-function getLazyDb(): Firestore {
-  if (_db) return _db;
-  _db = getFirestore(getApp());
-  return _db;
-}
-
-function getLazyGoogleProvider(): GoogleAuthProvider {
-  if (_googleProvider) return _googleProvider;
-  _googleProvider = new GoogleAuthProvider();
-  return _googleProvider;
-}
-
-// Proxy exports - only initialize when actually used at runtime
-export const auth = new Proxy({} as Auth, {
-  get(_target, prop) {
-    return (getLazyAuth() as any)[prop];
-  },
-  set(_target, prop, value) {
-    (getLazyAuth() as any)[prop] = value;
-    return true;
-  },
-});
-
-export const db = new Proxy({} as Firestore, {
-  get(_target, prop) {
-    return (getLazyDb() as any)[prop];
-  },
-});
-
-export const googleProvider = new Proxy({} as GoogleAuthProvider, {
-  get(_target, prop) {
-    return (getLazyGoogleProvider() as any)[prop];
-  },
-});
+// Configure Google Provider language to Arabic
+auth.languageCode = 'ar';
