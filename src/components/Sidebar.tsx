@@ -19,6 +19,7 @@ import {
   Menu,
   X,
   Award,
+  Shield,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -130,10 +131,10 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
       href: "/dashboard/admin/users",
     },
     {
-      id: "assignments",
-      label: "نظام التوزيع",
-      icon: Sparkles,
-      href: "/dashboard/admin/assignments",
+      id: "monitor",
+      label: "مركز الرقابة",
+      icon: Shield,
+      href: "/dashboard/admin/monitor",
     },
     {
       id: "gallery",

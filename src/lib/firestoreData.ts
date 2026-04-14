@@ -360,3 +360,40 @@ export async function updateUserRole(userId: string, newRole: string): Promise<b
     return false;
   }
 }
+
+export async function getAllConversations(): Promise<any[]> {
+  try {
+    const q = query(collection(db, "conversations"), orderBy("updated_at", "desc"));
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  } catch (error) {
+    console.error("Error fetching all conversations:", error);
+    return [];
+  }
+}
+
+export async function getConversationById(id: string): Promise<any | null> {
+  try {
+    const docRef = doc(db, "conversations", id);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      return { id: docSnap.id, ...docSnap.data() };
+    }
+    return null;
+  } catch (error) {
+    console.error("Error fetching conversation by id:", error);
+    return null;
+  }
+}
+
+export async function getConversationMessages(conversationId: string): Promise<any[]> {
+  try {
+    const messagesRef = collection(db, "conversations", conversationId, "messages");
+    const q = query(messagesRef, orderBy("created_at", "asc"));
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  } catch (error) {
+    console.error("Error fetching conversation messages:", error);
+    return [];
+  }
+}
