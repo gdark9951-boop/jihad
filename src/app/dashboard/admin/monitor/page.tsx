@@ -63,7 +63,7 @@ export default function AdminMonitorPage() {
   };
 
   const filteredConversations = conversations.filter(c => {
-    const names = c.participants.map(p => getUserName(p).toLowerCase()).join(" ");
+    const names = c.participants.map((p: string) => getUserName(p).toLowerCase()).join(" ");
     return names.includes(searchQuery.toLowerCase());
   });
 
@@ -133,7 +133,7 @@ export default function AdminMonitorPage() {
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                 <div className="flex items-center gap-6">
                   <div className="flex -space-x-4">
-                    {chat.participants.map((p, i) => (
+                    {chat.participants.map((p: string, i: number) => (
                       <div key={p} className={`w-12 h-12 rounded-full border-4 border-white dark:border-dark-card flex items-center justify-center text-white font-bold text-sm shadow-md ${i === 0 ? "bg-primary-500" : "bg-purple-500"}`}>
                         {getUserName(p).charAt(0)}
                       </div>

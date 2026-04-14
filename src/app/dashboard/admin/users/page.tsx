@@ -116,11 +116,11 @@ export default function AdminUsersPage() {
       {/* Users List */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {loading ? (
-          Array(6).fill(0).map((_, i) => (
+          Array(6).fill(0).map((_: any, i: number) => (
             <div key={i} className="h-48 bg-gray-100 dark:bg-dark-border animate-pulse rounded-google" />
           ))
         ) : filteredUsers.length > 0 ? (
-          filteredUsers.map((item) => (
+          filteredUsers.map((item: any) => (
             <motion.div
               key={item.id}
               whileHover={{ y: -5 }}

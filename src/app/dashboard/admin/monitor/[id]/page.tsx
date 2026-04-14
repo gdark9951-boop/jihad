@@ -139,7 +139,7 @@ export default function AdminMonitorDetailPage() {
       <div className="flex-1 overflow-y-auto p-8 space-y-8 bg-slate-50/50 dark:bg-dark-card/20">
         <AnimatePresence>
           {messages.length > 0 ? (
-            messages.map((item, index) => {
+            messages.map((item: any, index: number) => {
               const sender = getParticipant(item.sender_id);
               const isFirstInGroup = index === 0 || messages[index - 1].sender_id !== item.sender_id;
               
