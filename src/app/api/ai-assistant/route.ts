@@ -1,22 +1,26 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import OpenAI from "openai";
 import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
   try {
-    // نظام المفاتيح المتعددة - يستخدم عدة مفاتيح للتبديل بينها عند استهلاك الحد
-    const apiKeys = [
+    // 1. جمع مفاتيح Gemini
+    const geminiKeys = [
       process.env.GOOGLE_GEMINI_API_KEY,
       process.env.GOOGLE_GEMINI_API_KEY_2,
       process.env.GOOGLE_GEMINI_API_KEY_3,
     ].filter((key): key is string => !!key && key !== "");
 
-    if (apiKeys.length === 0) {
+    // 2. التحقق من مفتاح OpenAI
+    const openAIKey = process.env.OPENAI_API_KEY;
+
+    if (geminiKeys.length === 0 && !openAIKey) {
       return NextResponse.json(
         {
           success: false,
-          error: "يرجى إضافة Google Gemini API Key في ملف .env.local",
+          error: "يرجى إضافة API Key (Gemini أو OpenAI) في إعدادات Render",
           needsApiKey: true,
         },
         { status: 401 },
@@ -90,121 +94,88 @@ ${text}`;
         fullPrompt = prompt || text;
     }
 
-    // قائمة النماذج المجانية المتاحة - تم ترتيبها ذكياً لضمان العمل دائماً
-    const MODELS_TO_TRY = [
-      "gemini-2.0-flash",          // الخيار الأول: الأحدث والأسرع
-      "gemini-1.5-flash",          // الخيار الثاني: سريع وموثوق
-      "gemini-1.5-flash-8b",       // الخيار الثالث: أخف وأسرع
-      "gemini-2.0-flash-lite",     // الخيار الرابع: نسخة خفيفة
+    // قائمة نماذج Gemini المتاحة
+    const GEMINI_MODELS = [
+      "gemini-2.0-flash",
+      "gemini-1.5-flash",
+      "gemini-1.5-flash-8b",
+      "gemini-2.0-flash-lite",
     ];
 
     let generatedText = "";
     let success = false;
     let lastError = "";
+    let usedProvider = "";
     let usedModel = "";
 
-    // المحاولة بكل مفتاح متاح
-    for (const apiKey of apiKeys) {
+    // --- المرحلة الأولى: تجربة Gemini (لأنه مجاني) ---
+    for (const apiKey of geminiKeys) {
       if (success) break;
-
       const genAI = new GoogleGenerativeAI(apiKey);
-
-      // لكل مفتاح، نحاول الموديلات المتاحة
-      for (const modelName of MODELS_TO_TRY) {
+      for (const modelName of GEMINI_MODELS) {
         try {
-          console.log(`Trying model ${modelName} with an API key...`);
           const model = genAI.getGenerativeModel({ model: modelName });
-          
           const result = await model.generateContent(fullPrompt);
-          
           if (result && result.response) {
             generatedText = result.response.text();
             success = true;
+            usedProvider = "Google Gemini";
             usedModel = modelName;
-            console.log(`Successfully used model: ${modelName}`);
-            break; // نجحت المحاولة بهذا المفتاح والموديل
+            break;
           }
         } catch (err: any) {
           lastError = err.message || "";
-          console.warn(`Attempt failed with key. Reason:`, lastError);
-          
-          // إذا كان الخطأ هو استهلاك الحد، ننتقل للموديل التالي أو المفتاح التالي
-          if (lastError.includes("quota") || lastError.includes("429") || lastError.includes("limit")) {
-            continue;
-          }
-          
-          // إذا كان المفتاح غير صالح، ننتقل للمفتاح التالي فوراً
-          if (lastError.includes("API_KEY_INVALID") || lastError.includes("401")) {
-            break; 
-          }
+          if (lastError.includes("quota") || lastError.includes("429") || lastError.includes("limit")) continue;
+          if (lastError.includes("API_KEY_INVALID")) break;
         }
       }
     }
 
+    // --- المرحلة الثانية: تجربة OpenAI (إذا فشل Gemini وكان المفتاح موجوداً) ---
+    if (!success && openAIKey) {
+      try {
+        console.log("Trying OpenAI fallback...");
+        const openai = new OpenAI({ apiKey: openAIKey });
+        const completion = await openai.chat.completions.create({
+          messages: [{ role: "user", content: fullPrompt }],
+          model: "gpt-4o-mini", // نموذج سريع ورخيص
+          temperature: 0.7,
+        });
+
+        if (completion.choices[0]?.message?.content) {
+          generatedText = completion.choices[0].message.content;
+          success = true;
+          usedProvider = "OpenAI";
+          usedModel = "gpt-4o-mini";
+        }
+      } catch (err: any) {
+        lastError = err.message || "";
+        console.error("OpenAI Error:", lastError);
+      }
+    }
+
     if (!success) {
-      // تحليل الخطأ النهائي
       if (lastError.includes("quota") || lastError.includes("429")) {
         return NextResponse.json(
-          {
-            success: false,
-            error: "تم استهلاك الحد المجاني لجميع المفاتيح والموديلات. يرجى الانتظار دقيقة واحدة.",
-          },
+          { success: false, error: "تم استهلاك كافة الحصص المجانية والمتاحة. يرجى المحاولة لاحقاً." },
           { status: 429 }
         );
       }
-      throw new Error(lastError || "فشلت جميع المحاولات للاتصال بالذكاء الاصطناعي");
+      throw new Error(lastError || "فشلت جميع محاولات الاتصال بالذكاء الاصطناعي");
     }
 
     return NextResponse.json({
       success: true,
       text: generatedText,
+      provider: usedProvider,
       model: usedModel
     });
   } catch (error: any) {
-    console.error("AI Error Details:", {
-      message: error.message,
-      stack: error.stack,
-      name: error.name,
-    });
-
-    // تحليل نوع الخطأ
-    const errorMessage = error.message || "";
-
-    // إذا كان الخطأ متعلق بـ API key
-    if (
-      errorMessage.includes("API") &&
-      (errorMessage.includes("key") || errorMessage.includes("KEY"))
-    ) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "مفتاح API غير صحيح. تأكد من صحة المفتاح في ملف .env.local",
-          needsApiKey: true,
-        },
-        { status: 401 },
-      );
-    }
-
-    // إذا كان الخطأ متعلق بالحصة
-    if (
-      errorMessage.includes("quota") ||
-      errorMessage.includes("limit") ||
-      errorMessage.includes("exhausted")
-    ) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "تم تجاوز الحد المجاني. انتظر قليلاً وحاول مرة أخرى.",
-        },
-        { status: 429 },
-      );
-    }
-
-    // أخطاء أخرى
+    console.error("AI Error Details:", error);
     return NextResponse.json(
       {
         success: false,
-        error: `حدث خطأ: ${errorMessage || "خطأ غير معروف"}`,
+        error: `حدث خطأ: ${error.message || "خطأ غير معروف"}`,
       },
       { status: 500 },
     );
