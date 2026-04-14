@@ -5,14 +5,14 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-// التحقق من وجود المتغيرات البيئية
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+// التحقق من وجود المتغيرات البيئية (بدون تحطيم عملية البناء)
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error(
-    "Missing Supabase environment variables. Please check your .env.local file.",
-  );
+  if (process.env.NODE_ENV === "production" && typeof window === "undefined") {
+    console.warn("⚠️ Warning: Supabase environment variables are missing during build.");
+  }
 }
 
 // إنشاء عميل Supabase
