@@ -13,14 +13,15 @@ export async function POST(request: NextRequest) {
       process.env.GOOGLE_GEMINI_API_KEY_3,
     ].filter((key): key is string => !!key && key !== "");
 
-    // 2. التحقق من مفتاح OpenAI
+    // 2. التحقق من مفتاح OpenAI ومفتاح Groq
     const openAIKey = process.env.OPENAI_API_KEY;
+    const groqKey = process.env.GROQ_API_KEY;
 
-    if (geminiKeys.length === 0 && !openAIKey) {
+    if (geminiKeys.length === 0 && !openAIKey && !groqKey) {
       return NextResponse.json(
         {
           success: false,
-          error: "يرجى إضافة API Key (Gemini أو OpenAI) في إعدادات Render",
+          error: "يرجى إضافة API Key (Gemini أو OpenAI أو Groq) في إعدادات Render",
           needsApiKey: true,
         },
         { status: 401 },
@@ -30,13 +31,7 @@ export async function POST(request: NextRequest) {
     const { prompt, action, text } = await request.json();
 
     if (!text || text.trim() === "") {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "النص فارغ. الرجاء تحديد نص أولاً.",
-        },
-        { status: 400 },
-      );
+      return NextResponse.json({ success: false, error: "النص فارغ. الرجاء تحديد نص أولاً." }, { status: 400 });
     }
 
     let fullPrompt = "";
@@ -94,21 +89,14 @@ ${text}`;
         fullPrompt = prompt || text;
     }
 
-    // قائمة نماذج Gemini المتاحة
-    const GEMINI_MODELS = [
-      "gemini-2.0-flash",
-      "gemini-1.5-flash",
-      "gemini-1.5-flash-8b",
-      "gemini-2.0-flash-lite",
-    ];
-
     let generatedText = "";
     let success = false;
     let lastError = "";
     let usedProvider = "";
     let usedModel = "";
 
-    // --- المرحلة الأولى: تجربة Gemini (لأنه مجاني) ---
+    // --- المرحلة الأولى: تجربة Gemini (مجاني) ---
+    const GEMINI_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-2.0-flash-lite"];
     for (const apiKey of geminiKeys) {
       if (success) break;
       const genAI = new GoogleGenerativeAI(apiKey);
@@ -131,14 +119,43 @@ ${text}`;
       }
     }
 
-    // --- المرحلة الثانية: تجربة OpenAI (إذا فشل Gemini وكان المفتاح موجوداً) ---
+    // --- المرحلة الثانية: تجربة Groq (سريع ومجاني للحد المعقول) ---
+    if (!success && groqKey) {
+      const GROQ_MODELS = ["llama-3.3-70b-versatile", "llama3-8b-8192", "mixtral-8x7b-32768"];
+      const groqClient = new OpenAI({ apiKey: groqKey, baseURL: "https://api.groq.com/openai/v1" });
+      
+      for (const modelName of GROQ_MODELS) {
+        if (success) break;
+        try {
+          console.log(`Trying Groq model: ${modelName}`);
+          const completion = await groqClient.chat.completions.create({
+            messages: [{ role: "user", content: fullPrompt }],
+            model: modelName,
+            temperature: 0.7,
+          });
+
+          if (completion.choices[0]?.message?.content) {
+            generatedText = completion.choices[0].message.content;
+            success = true;
+            usedProvider = "Groq";
+            usedModel = modelName;
+            break;
+          }
+        } catch (err: any) {
+          lastError = err.message || "";
+          console.error("Groq Error:", lastError);
+          if (lastError.includes("quota") || lastError.includes("429")) continue;
+        }
+      }
+    }
+
+    // --- المرحلة الثالثة: تجربة OpenAI (مدفوع/رصيد) ---
     if (!success && openAIKey) {
       try {
-        console.log("Trying OpenAI fallback...");
         const openai = new OpenAI({ apiKey: openAIKey });
         const completion = await openai.chat.completions.create({
           messages: [{ role: "user", content: fullPrompt }],
-          model: "gpt-4o-mini", // نموذج سريع ورخيص
+          model: "gpt-4o-mini",
           temperature: 0.7,
         });
 
@@ -150,34 +167,19 @@ ${text}`;
         }
       } catch (err: any) {
         lastError = err.message || "";
-        console.error("OpenAI Error:", lastError);
       }
     }
 
     if (!success) {
       if (lastError.includes("quota") || lastError.includes("429")) {
-        return NextResponse.json(
-          { success: false, error: "تم استهلاك كافة الحصص المجانية والمتاحة. يرجى المحاولة لاحقاً." },
-          { status: 429 }
-        );
+        return NextResponse.json({ success: false, error: "تم استهلاك كافة الحصص المجانية والمتاحة. يرجى المحاولة بعد قليل." }, { status: 429 });
       }
       throw new Error(lastError || "فشلت جميع محاولات الاتصال بالذكاء الاصطناعي");
     }
 
-    return NextResponse.json({
-      success: true,
-      text: generatedText,
-      provider: usedProvider,
-      model: usedModel
-    });
+    return NextResponse.json({ success: true, text: generatedText, provider: usedProvider, model: usedModel });
   } catch (error: any) {
     console.error("AI Error Details:", error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: `حدث خطأ: ${error.message || "خطأ غير معروف"}`,
-      },
-      { status: 500 },
-    );
+    return NextResponse.json({ success: false, error: `حدث خطأ: ${error.message || "خطأ غير معروف"}` }, { status: 500 });
   }
 }
