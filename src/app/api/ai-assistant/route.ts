@@ -5,10 +5,14 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
   try {
-    // التحقق من وجود API key أولاً
-    const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
+    // نظام المفاتيح المتعددة - يستخدم عدة مفاتيح للتبديل بينها عند استهلاك الحد
+    const apiKeys = [
+      process.env.GOOGLE_GEMINI_API_KEY,
+      process.env.GOOGLE_GEMINI_API_KEY_2,
+      process.env.GOOGLE_GEMINI_API_KEY_3,
+    ].filter((key): key is string => !!key && key !== "");
 
-    if (!apiKey || apiKey === "") {
+    if (apiKeys.length === 0) {
       return NextResponse.json(
         {
           success: false,
@@ -19,7 +23,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const genAI = new GoogleGenerativeAI(apiKey);
     const { prompt, action, text } = await request.json();
 
     if (!text || text.trim() === "") {
@@ -95,70 +98,67 @@ ${text}`;
       "gemini-2.0-flash-lite",     // الخيار الرابع: نسخة خفيفة
     ];
 
-    let result;
+    let generatedText = "";
     let success = false;
     let lastError = "";
     let usedModel = "";
 
-    for (const modelName of MODELS_TO_TRY) {
-      try {
-        console.log(`Trying AI model: ${modelName}...`);
-        const model = genAI.getGenerativeModel({ model: modelName });
-        
-        // ضبط مهلة زمنية للمحاولة (Timeout) لضمان السرعة في التبديل
-        result = await model.generateContent(fullPrompt);
-        
-        if (result && result.response) {
-          success = true;
-          usedModel = modelName;
-          console.log(`Successfully used model: ${modelName}`);
-          break; 
+    // المحاولة بكل مفتاح متاح
+    for (const apiKey of apiKeys) {
+      if (success) break;
+
+      const genAI = new GoogleGenerativeAI(apiKey);
+
+      // لكل مفتاح، نحاول الموديلات المتاحة
+      for (const modelName of MODELS_TO_TRY) {
+        try {
+          console.log(`Trying model ${modelName} with an API key...`);
+          const model = genAI.getGenerativeModel({ model: modelName });
+          
+          const result = await model.generateContent(fullPrompt);
+          
+          if (result && result.response) {
+            generatedText = result.response.text();
+            success = true;
+            usedModel = modelName;
+            console.log(`Successfully used model: ${modelName}`);
+            break; // نجحت المحاولة بهذا المفتاح والموديل
+          }
+        } catch (err: any) {
+          lastError = err.message || "";
+          console.warn(`Attempt failed with key. Reason:`, lastError);
+          
+          // إذا كان الخطأ هو استهلاك الحد، ننتقل للموديل التالي أو المفتاح التالي
+          if (lastError.includes("quota") || lastError.includes("429") || lastError.includes("limit")) {
+            continue;
+          }
+          
+          // إذا كان المفتاح غير صالح، ننتقل للمفتاح التالي فوراً
+          if (lastError.includes("API_KEY_INVALID") || lastError.includes("401")) {
+            break; 
+          }
         }
-      } catch (err: any) {
-        lastError = err.message || "";
-        console.warn(`Model ${modelName} failed. Reason:`, lastError);
-        
-        // إذا كان الخطأ هو "مفتاح الربط غير صحيح"، لا فائدة من تجربة موديلات أخرى بنفس المفتاح
-        if (lastError.includes("API_KEY_INVALID") || lastError.includes("401")) {
-          break;
-        }
-        // استمر لتجربة الموديل التالي في القائمة
-        continue;
       }
     }
 
-    if (!success || !result) {
-      // تحليل الخطأ النهائي لإظهاره للمستخدم بشكل مفهوم
-      if (lastError.includes("API_KEY_INVALID")) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: "مفتاح الـ API الذي أدخلته غير صحيح. يرجى الحصول على مفتاح جديد من Google AI Studio.",
-            needsApiKey: true,
-          },
-          { status: 401 }
-        );
-      }
-
+    if (!success) {
+      // تحليل الخطأ النهائي
       if (lastError.includes("quota") || lastError.includes("429")) {
         return NextResponse.json(
           {
             success: false,
-            error: "تم استهلاك الحد المجاني لجميع الموديلات المتاحة حالياً. يرجى المحاولة بعد دقيقة واحدة.",
+            error: "تم استهلاك الحد المجاني لجميع المفاتيح والموديلات. يرجى الانتظار دقيقة واحدة.",
           },
           { status: 429 }
         );
       }
-
       throw new Error(lastError || "فشلت جميع المحاولات للاتصال بالذكاء الاصطناعي");
     }
-
-    const response = result.response;
-    const generatedText = response.text();
 
     return NextResponse.json({
       success: true,
       text: generatedText,
+      model: usedModel
     });
   } catch (error: any) {
     console.error("AI Error Details:", {
