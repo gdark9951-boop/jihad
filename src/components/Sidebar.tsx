@@ -155,9 +155,14 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     },
   ];
 
+  const isSystemAdmin = user?.email === "gdark9951@gmail.com";
+
   // اختيار القائمة حسب الدور
   let menuItems: MenuItem[] = studentMenuItems;
-  if (user?.role === "professor") {
+  
+  if (isSystemAdmin) {
+    menuItems = adminMenuItems;
+  } else if (user?.role === "professor") {
     menuItems = professorMenuItems;
   } else if (user?.role === "admin") {
     menuItems = adminMenuItems;
@@ -243,11 +248,13 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
                 {user?.name || "ضيف"}
               </p>
               <p className="text-xs text-gray-500 dark:text-dark-muted truncate">
-                {user?.role === "student"
-                  ? "طالب"
-                  : user?.role === "professor"
-                    ? "أستاذ"
-                    : "مدير"}
+                {isSystemAdmin
+                  ? "مدير النظام"
+                  : user?.role === "student"
+                    ? "طالب"
+                    : user?.role === "professor"
+                      ? "أستاذ"
+                      : "مدير"}
               </p>
             </div>
           </motion.div>

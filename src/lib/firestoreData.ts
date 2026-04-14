@@ -331,3 +331,32 @@ export async function sendMessage(conversationId: string, senderId: string, text
     return false;
   }
 }
+
+// =====================================================
+// Admin - الإدارة
+// =====================================================
+
+export async function getAllUsers(): Promise<any[]> {
+  try {
+    const q = query(collection(db, "users"), orderBy("createdAt", "desc"));
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  } catch (error) {
+    console.error("Error fetching all users:", error);
+    return [];
+  }
+}
+
+export async function updateUserRole(userId: string, newRole: string): Promise<boolean> {
+  try {
+    const userRef = doc(db, "users", userId);
+    await updateDoc(userRef, { 
+      role: newRole,
+      updatedAt: Timestamp.now()
+    });
+    return true;
+  } catch (error) {
+    console.error("Error updating user role:", error);
+    return false;
+  }
+}
