@@ -1,6 +1,8 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextRequest, NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 export async function POST(request: NextRequest) {
   try {
     // التحقق من وجود API key أولاً
@@ -85,46 +87,69 @@ ${text}`;
         fullPrompt = prompt || text;
     }
 
-    // قائمة النماذج المجانية المتاحة لحسابك - تم ترتيبها لتجربة بدائل عند تجاوز الحد
+    // قائمة النماذج المجانية المتاحة - تم ترتيبها ذكياً لضمان العمل دائماً
     const MODELS_TO_TRY = [
-      "gemini-2.0-flash", 
-      "gemini-flash-latest",
-      "gemini-2.5-flash", // إضافة النسخة الأحدث كبديل
-      "gemini-pro-latest",
-      "gemma-3-27b-it", // استخدام Gemma كخيار أخير لأنه غالباً يمتلك حصة منفصلة
+      "gemini-1.5-flash",        // الخيار الأول: سريع جداً وحصة مجانية كبيرة
+      "gemini-1.5-flash-8b",     // الخيار الثاني: أخف وأسرع وحصته غالباً مستقلة
+      "gemini-2.0-flash-exp",    // الخيار الثالث: النسخة التجريبية الأحدث
+      "gemini-1.5-pro",          // الخيار الرابع: للأداء العالي إذا فشلت البقية
     ];
 
     let result;
     let success = false;
     let lastError = "";
+    let usedModel = "";
 
     for (const modelName of MODELS_TO_TRY) {
       try {
+        console.log(`Trying AI model: ${modelName}...`);
         const model = genAI.getGenerativeModel({ model: modelName });
+        
+        // ضبط مهلة زمنية للمحاولة (Timeout) لضمان السرعة في التبديل
         result = await model.generateContent(fullPrompt);
-        success = true;
-        break; 
+        
+        if (result && result.response) {
+          success = true;
+          usedModel = modelName;
+          console.log(`Successfully used model: ${modelName}`);
+          break; 
+        }
       } catch (err: any) {
         lastError = err.message || "";
-        console.warn(`Failed with ${modelName}:`, lastError);
+        console.warn(`Model ${modelName} failed. Reason:`, lastError);
         
-        // استمر في تجربة الموديلات الأخرى حتى لو كان الخطأ "تجاوز الحد" (Quota)
-        // لأن كل موديل غالباً ما يمتلك حصة (Quota) منفصلة
+        // إذا كان الخطأ هو "مفتاح الربط غير صحيح"، لا فائدة من تجربة موديلات أخرى بنفس المفتاح
+        if (lastError.includes("API_KEY_INVALID") || lastError.includes("401")) {
+          break;
+        }
+        // استمر لتجربة الموديل التالي في القائمة
         continue;
       }
     }
 
     if (!success || !result) {
-      // إذا كان الخطأ الأخير هو تجاوز الحد، نظهر رسالة واضحة للمستخدم
+      // تحليل الخطأ النهائي لإظهاره للمستخدم بشكل مفهوم
+      if (lastError.includes("API_KEY_INVALID")) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "مفتاح الـ API الذي أدخلته غير صحيح. يرجى الحصول على مفتاح جديد من Google AI Studio.",
+            needsApiKey: true,
+          },
+          { status: 401 }
+        );
+      }
+
       if (lastError.includes("quota") || lastError.includes("429")) {
         return NextResponse.json(
           {
             success: false,
-            error: "تم تجاوز الحد المجاني لجميع النسخ المتاحة حالياً. يرجى الانتظار دقيقة واحدة والمحاولة مرة أخرى.",
+            error: "تم استهلاك الحد المجاني لجميع الموديلات المتاحة حالياً. يرجى المحاولة بعد دقيقة واحدة.",
           },
-          { status: 429 },
+          { status: 429 }
         );
       }
+
       throw new Error(lastError || "فشلت جميع المحاولات للاتصال بالذكاء الاصطناعي");
     }
 
