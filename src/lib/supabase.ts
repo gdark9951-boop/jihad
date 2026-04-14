@@ -1,42 +1,69 @@
 /**
  * Supabase Client Configuration
- * ملف الاتصال بقاعدة البيانات
+ * Lazy initialization to prevent build-time crashes on Render/Vercel
  */
 
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
-// التحقق من وجود المتغيرات البيئية (بدون تحطيم عملية البناء)
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+// Lazy singleton instances - only created when first used at runtime
+let _supabase: SupabaseClient | null = null;
+let _supabaseAdmin: SupabaseClient | null = null;
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  if (process.env.NODE_ENV === "production" && typeof window === "undefined") {
-    console.warn("⚠️ Warning: Supabase environment variables are missing during build.");
+function getSupabaseClient(): SupabaseClient {
+  if (_supabase) return _supabase;
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!url || !key) {
+    throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY environment variables.");
   }
+
+  _supabase = createClient(url, key, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      storage: typeof window !== "undefined" ? window.localStorage : undefined,
+    },
+  });
+  return _supabase;
 }
 
-// إنشاء عميل Supabase
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-    storage: typeof window !== "undefined" ? window.localStorage : undefined,
+function getSupabaseAdmin(): SupabaseClient {
+  if (_supabaseAdmin) return _supabaseAdmin;
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !key) {
+    throw new Error("Missing Supabase environment variables.");
+  }
+
+  _supabaseAdmin = serviceKey
+    ? createClient(url, serviceKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      })
+    : getSupabaseClient();
+
+  return _supabaseAdmin;
+}
+
+// These are Proxy objects - they look like the real client but only
+// initialize the actual connection when a method is first called at runtime.
+export const supabase = new Proxy({} as SupabaseClient, {
+  get(_target, prop) {
+    return (getSupabaseClient() as any)[prop];
   },
 });
 
-// Supabase Admin Client (للاستخدام في API routes فقط)
-// يتجاوز سياسات RLS - استخدمه بحذر!
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+export const supabaseAdmin = new Proxy({} as SupabaseClient, {
+  get(_target, prop) {
+    return (getSupabaseAdmin() as any)[prop];
+  },
+});
 
-export const supabaseAdmin = supabaseServiceKey
-  ? createClient(supabaseUrl, supabaseServiceKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
-    })
-  : supabase; // fallback to regular client if service key not available
 
 // أنواع البيانات TypeScript
 export type Json =
