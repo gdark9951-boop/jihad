@@ -1,27 +1,17 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import OpenAI from "openai";
 import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
   try {
-    // 1. جمع مفاتيح Gemini
-    const geminiKeys = [
-      process.env.GOOGLE_GEMINI_API_KEY,
-      process.env.GOOGLE_GEMINI_API_KEY_2,
-      process.env.GOOGLE_GEMINI_API_KEY_3,
-    ].filter((key): key is string => !!key && key !== "");
+    const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
 
-    // 2. التحقق من مفتاح OpenAI ومفتاح Groq
-    const openAIKey = process.env.OPENAI_API_KEY;
-    const groqKey = process.env.GROQ_API_KEY;
-
-    if (geminiKeys.length === 0 && !openAIKey && !groqKey) {
+    if (!apiKey) {
       return NextResponse.json(
         {
           success: false,
-          error: "يرجى إضافة API Key (Gemini أو OpenAI أو Groq) في إعدادات Render",
+          error: "يرجى إضافة GOOGLE_GEMINI_API_KEY في إعدادات Render",
           needsApiKey: true,
         },
         { status: 401 },
@@ -89,97 +79,39 @@ ${text}`;
         fullPrompt = prompt || text;
     }
 
-    let generatedText = "";
-    let success = false;
-    let lastError = "";
-    let usedProvider = "";
-    let usedModel = "";
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    
+    try {
+      const result = await model.generateContent(fullPrompt);
+      const generatedText = result.response.text();
 
-    // --- المرحلة الأولى: تجربة Gemini (مجاني) ---
-    const GEMINI_MODELS = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-2.0-flash-lite"];
-    for (const apiKey of geminiKeys) {
-      if (success) break;
-      const genAI = new GoogleGenerativeAI(apiKey);
-      for (const modelName of GEMINI_MODELS) {
-        try {
-          const model = genAI.getGenerativeModel({ model: modelName });
-          const result = await model.generateContent(fullPrompt);
-          if (result && result.response) {
-            generatedText = result.response.text();
-            success = true;
-            usedProvider = "Google Gemini";
-            usedModel = modelName;
-            break;
-          }
-        } catch (err: any) {
-          lastError = err.message || "";
-          if (lastError.includes("quota") || lastError.includes("429") || lastError.includes("limit")) continue;
-          if (lastError.includes("API_KEY_INVALID")) break;
-        }
-      }
-    }
-
-    // --- المرحلة الثانية: تجربة Groq (سريع ومجاني للحد المعقول) ---
-    if (!success && groqKey) {
-      const GROQ_MODELS = ["llama-3.3-70b-versatile", "llama3-8b-8192", "mixtral-8x7b-32768"];
-      const groqClient = new OpenAI({ apiKey: groqKey, baseURL: "https://api.groq.com/openai/v1" });
+      return NextResponse.json({ 
+        success: true, 
+        text: generatedText, 
+        provider: "Google Gemini", 
+        model: "gemini-2.0-flash" 
+      });
+    } catch (genError: any) {
+      console.error("Gemini Error:", genError);
       
-      for (const modelName of GROQ_MODELS) {
-        if (success) break;
-        try {
-          console.log(`Trying Groq model: ${modelName}`);
-          const completion = await groqClient.chat.completions.create({
-            messages: [{ role: "user", content: fullPrompt }],
-            model: modelName,
-            temperature: 0.7,
-          });
+      // محاولة بموديل أقدم في حال فشل الجديد
+      const fallbackModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const fallbackResult = await fallbackModel.generateContent(fullPrompt);
+      const fallbackText = fallbackResult.response.text();
 
-          if (completion.choices[0]?.message?.content) {
-            generatedText = completion.choices[0].message.content;
-            success = true;
-            usedProvider = "Groq";
-            usedModel = modelName;
-            break;
-          }
-        } catch (err: any) {
-          lastError = err.message || "";
-          console.error("Groq Error:", lastError);
-          if (lastError.includes("quota") || lastError.includes("429")) continue;
-        }
-      }
+      return NextResponse.json({ 
+        success: true, 
+        text: fallbackText, 
+        provider: "Google Gemini", 
+        model: "gemini-1.5-flash" 
+      });
     }
-
-    // --- المرحلة الثالثة: تجربة OpenAI (مدفوع/رصيد) ---
-    if (!success && openAIKey) {
-      try {
-        const openai = new OpenAI({ apiKey: openAIKey });
-        const completion = await openai.chat.completions.create({
-          messages: [{ role: "user", content: fullPrompt }],
-          model: "gpt-4o-mini",
-          temperature: 0.7,
-        });
-
-        if (completion.choices[0]?.message?.content) {
-          generatedText = completion.choices[0].message.content;
-          success = true;
-          usedProvider = "OpenAI";
-          usedModel = "gpt-4o-mini";
-        }
-      } catch (err: any) {
-        lastError = err.message || "";
-      }
-    }
-
-    if (!success) {
-      if (lastError.includes("quota") || lastError.includes("429")) {
-        return NextResponse.json({ success: false, error: "تم استهلاك كافة الحصص المجانية والمتاحة. يرجى المحاولة بعد قليل." }, { status: 429 });
-      }
-      throw new Error(lastError || "فشلت جميع محاولات الاتصال بالذكاء الاصطناعي");
-    }
-
-    return NextResponse.json({ success: true, text: generatedText, provider: usedProvider, model: usedModel });
   } catch (error: any) {
-    console.error("AI Error Details:", error);
-    return NextResponse.json({ success: false, error: `حدث خطأ: ${error.message || "خطأ غير معروف"}` }, { status: 500 });
+    console.error("AI Assistant Error:", error);
+    return NextResponse.json({ 
+      success: false, 
+      error: error.message || "حدث خطأ غير متوقع" 
+    }, { status: 500 });
   }
 }

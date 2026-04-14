@@ -22,7 +22,7 @@ import {
   getUserResearch,
   getUserSources,
   getUserTasks,
-} from "@/lib/supabaseData";
+} from "@/lib/firestoreData";
 
 export default function DashboardPage() {
   const { user } = useUser();

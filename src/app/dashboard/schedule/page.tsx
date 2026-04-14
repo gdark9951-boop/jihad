@@ -23,7 +23,7 @@ import {
   addTask as addTaskDB,
   updateTask as updateTaskDB,
   deleteTask as deleteTaskDB,
-} from "@/lib/supabaseData";
+} from "@/lib/firestoreData";
 
 export default function SchedulePage() {
   const router = useRouter();
