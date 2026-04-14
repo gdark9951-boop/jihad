@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+
 // POST: ترشيح بحث للنشر أو جعله مميزاً
 export async function POST(request: NextRequest) {
   try {
