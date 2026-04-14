@@ -27,7 +27,7 @@ import {
   getUserSources,
   addSource as addSourceDB,
   deleteSource as deleteSourceDB,
-} from "@/lib/supabaseData";
+} from "@/lib/firestoreData";
 
 interface Source {
   id: number;

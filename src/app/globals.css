@@ -47,14 +47,16 @@
     @apply bg-dark-card border-dark-border text-dark-text;
   }
 
-  /* البطاقات */
+  /* البطاقات الزجاجية - Glassmorphism */
   .card {
-    @apply bg-white rounded-google shadow-google border border-medad-border
-           hover:shadow-google-lg transition-all duration-200;
+    @apply bg-white/70 dark:bg-dark-card/60 backdrop-blur-xl border border-white/20 dark:border-white/5 
+           shadow-google hover:shadow-google-lg transition-all duration-300 rounded-3xl overflow-hidden;
   }
 
-  .dark .card {
-    @apply bg-dark-card border-dark-border shadow-dark;
+  .card-premium {
+    @apply bg-gradient-to-br from-white/80 to-white/40 dark:from-dark-card/80 dark:to-dark-card/40 
+           backdrop-blur-2xl border border-white/20 dark:border-white/10 shadow-google-lg 
+           hover:shadow-2xl transition-all duration-500 rounded-3xl;
   }
 
   /* الشريط الجانبي */

@@ -47,6 +47,9 @@ module.exports = {
       },
       borderRadius: {
         'google': '8px',
+      },
+      backgroundImage: {
+        'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
       }
     },
   },

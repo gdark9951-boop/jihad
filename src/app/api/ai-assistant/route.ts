@@ -30,66 +30,103 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // نموذج Gemini المجاني - استخدام أحدث نموذج متاح
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-
     let fullPrompt = "";
 
     switch (action) {
       case "improve":
-        fullPrompt = `أنت مساعد أكاديمي متخصص في تحسين النصوص البحثية. 
-حسّن النص التالي من الناحية اللغوية والأكاديمية مع الحفاظ على المعنى:
+        fullPrompt = `أنت مساعد أكاديمي دقيق. مهمتك هي تحسين النص التالي أكاديمياً ولغوياً.
+قاعدة صارمة جداً: ممنوع منعاً باتاً استخدام أي رموز تنسيق مثل النجوم (**) أو الخطوط أو علامات الاقتباس أو الترقيم الزائدة. قدم النص المحسّن فقط كنص صافي (Plain Text) بدون أي زخرفة.
 
-${text}
-
-قدم نسخة محسنة فقط بدون شرح.`;
+النص:
+${text}`;
         break;
 
       case "rephrase":
-        fullPrompt = `أعد صياغة النص التالي بأسلوب أكاديمي احترافي:
+        fullPrompt = `أعد صياغة النص التالي بأسلوب أكاديمي محترف.
+قاعدة صارمة جداً: قدم النص المعاد صياغته فقط كنص صافي بدون أي رموز تنسيق مثل النجوم أو غيرها. لا تضف أي شرح أو مقدمات.
 
-${text}
-
-قدم النص المعاد صياغته فقط بدون شرح.`;
+النص:
+${text}`;
         break;
 
       case "summarize":
-        fullPrompt = `لخص النص التالي بشكل موجز ومفيد:
+        fullPrompt = `لخص النص التالي بشكل موجز.
+قاعدة صارمة: ممنوع استخدام أي رموز تنسيق مثل النجوم أو النقاط البرمجية. قدم الملخص كنص صافي فقط.
 
-${text}
-
-قدم الملخص فقط بدون مقدمات.`;
+النص:
+${text}`;
         break;
 
       case "expand":
-        fullPrompt = `وسّع الفكرة التالية بشكل أكاديمي مع إضافة تفاصيل وأمثلة:
+        fullPrompt = `وسّع الفكرة التالية بشكل أكاديمي.
+قاعدة صارمة: ممنوع استخدام أي رموز تنسيق أو نجوم. قدم النص الموسع كنص صافي فقط.
 
-${text}
-
-قدم النص الموسع فقط.`;
+النص:
+${text}`;
         break;
 
       case "grammar":
-        fullPrompt = `صحح الأخطاء اللغوية والنحوية في النص التالي:
+        fullPrompt = `صحح الأخطاء اللغوية والنحوية في النص التالي.
+قاعدة صارمة جداً: ممنوع منعاً باتاً إضافة أي رموز تنسيق أو نجوم أو تنبيهات. قدم النص المصحح فقط كنص صافي.
 
-${text}
-
-قدم النص المصحح فقط.`;
+النص:
+${text}`;
         break;
 
       case "suggest":
-        fullPrompt = `اقترح 3 أفكار لتطوير أو إضافة للنص التالي:
+        fullPrompt = `اقترح 3 أفكار لتطوير النص التالي في نقاط موجزة جداً.
+ممنوع استخدام النجوم أو أي رموز تنسيق.
 
-${text}
-
-قدم الاقتراحات في نقاط واضحة.`;
+النص:
+${text}`;
         break;
 
       default:
         fullPrompt = prompt || text;
     }
 
-    const result = await model.generateContent(fullPrompt);
+    // قائمة النماذج المجانية المتاحة لحسابك - تم ترتيبها لتجربة بدائل عند تجاوز الحد
+    const MODELS_TO_TRY = [
+      "gemini-2.0-flash", 
+      "gemini-flash-latest",
+      "gemini-2.5-flash", // إضافة النسخة الأحدث كبديل
+      "gemini-pro-latest",
+      "gemma-3-27b-it", // استخدام Gemma كخيار أخير لأنه غالباً يمتلك حصة منفصلة
+    ];
+
+    let result;
+    let success = false;
+    let lastError = "";
+
+    for (const modelName of MODELS_TO_TRY) {
+      try {
+        const model = genAI.getGenerativeModel({ model: modelName });
+        result = await model.generateContent(fullPrompt);
+        success = true;
+        break; 
+      } catch (err: any) {
+        lastError = err.message || "";
+        console.warn(`Failed with ${modelName}:`, lastError);
+        
+        // استمر في تجربة الموديلات الأخرى حتى لو كان الخطأ "تجاوز الحد" (Quota)
+        // لأن كل موديل غالباً ما يمتلك حصة (Quota) منفصلة
+        continue;
+      }
+    }
+
+    if (!success || !result) {
+      // إذا كان الخطأ الأخير هو تجاوز الحد، نظهر رسالة واضحة للمستخدم
+      if (lastError.includes("quota") || lastError.includes("429")) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "تم تجاوز الحد المجاني لجميع النسخ المتاحة حالياً. يرجى الانتظار دقيقة واحدة والمحاولة مرة أخرى.",
+          },
+          { status: 429 },
+        );
+      }
+      throw new Error(lastError || "فشلت جميع المحاولات للاتصال بالذكاء الاصطناعي");
+    }
 
     const response = result.response;
     const generatedText = response.text();

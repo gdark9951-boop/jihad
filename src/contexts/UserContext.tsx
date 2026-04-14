@@ -1,8 +1,15 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
-import { User as SupabaseUser } from "@supabase/supabase-js";
+import { auth, googleProvider, db } from "@/lib/firebase";
+import { 
+  signInWithPopup, 
+  signOut, 
+  onAuthStateChanged, 
+  createUserWithEmailAndPassword,
+  User as FirebaseUser
+} from "firebase/auth";
+import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
 
 export type UserRole = "student" | "professor" | "admin";
 
@@ -11,22 +18,14 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
+  image?: string;
 }
 
 interface UserContextType {
   user: User | null;
-  login: (
-    email: string,
-    password: string,
-    role?: UserRole,
-  ) => Promise<{ success: boolean; error?: string }>;
+  register: (name: string, email: string, password: string, role: UserRole) => Promise<{ success: boolean; error?: string }>;
+  loginWithGoogle: () => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
-  register: (
-    name: string,
-    email: string,
-    password: string,
-    role: UserRole,
-  ) => Promise<{ success: boolean; error?: string }>;
   updateUser: (userData: Partial<User>) => Promise<void>;
   isAuthenticated: boolean;
   loading: boolean;
@@ -38,73 +37,49 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const mapAuthUserToLocalUser = (
-    authUser: SupabaseUser,
-    fallbackRole: UserRole = "student",
-  ): User => ({
-    id: authUser.id,
-    name: (authUser.user_metadata?.name as string) || "مستخدم",
-    email: authUser.email || "",
-    role: (authUser.user_metadata?.user_type as UserRole) || fallbackRole,
-  });
-
-  // تحميل بيانات المستخدم من قاعدة البيانات
-  const loadUserData = async (authUser: SupabaseUser): Promise<User | null> => {
+  // تحميل بيانات المستخدم من Firestore
+  const loadUserData = async (firebaseUser: FirebaseUser): Promise<User | null> => {
     try {
-      const { data, error } = await supabase
-        .from("users")
-        .select("*")
-        .eq("id", authUser.id)
-        .single();
+      const userDocRef = doc(db, "users", firebaseUser.uid);
+      const userDoc = await getDoc(userDocRef);
 
-      if (error && error.code !== "PGRST116") throw error;
-
-      if (data) {
+      if (userDoc.exists()) {
+        const data = userDoc.data();
         const userData: User = {
-          id: data.id,
-          name: data.name,
-          email: data.email,
-          role: data.user_type as UserRole,
+          id: firebaseUser.uid,
+          name: data.name || firebaseUser.displayName || "مستخدم",
+          email: firebaseUser.email || "",
+          role: data.role || "student",
+          image: firebaseUser.photoURL || data.image || undefined,
         };
+
+        // إذا كانت الصورة موجودة في قوقل وغير موجودة في السجل، قم بتحديث السجل
+        if (firebaseUser.photoURL && !data.image) {
+          updateDoc(userDocRef, { image: firebaseUser.photoURL });
+        }
+
         setUser(userData);
         return userData;
       } else {
-        // المستخدم موجود في Auth ولكن غير موجود في جدول users
-        const { error: insertError } = await supabase.from("users").upsert(
-          {
-            id: authUser.id,
-            email: authUser.email!,
-            name: authUser.user_metadata.name || "مستخدم",
-            user_type: authUser.user_metadata.user_type || "student",
-          },
-          {
-            onConflict: "id",
-          },
-        );
-
-        if (insertError) {
-          console.error("Failed to create user record:", insertError);
-          return null;
-        }
-
-        // إعادة المحاولة
-        const { data: newData } = await supabase
-          .from("users")
-          .select("*")
-          .eq("id", authUser.id)
-          .single();
-
-        if (newData) {
-          const userData: User = {
-            id: newData.id,
-            name: newData.name,
-            email: newData.email,
-            role: newData.user_type as UserRole,
-          };
-          setUser(userData);
-          return userData;
-        }
-        return null;
+        // إنشاء سجل جديد في Firestore إذا لم يكن موجوداً
+        const newUser: User = {
+          id: firebaseUser.uid,
+          name: firebaseUser.displayName || "مستخدم",
+          email: firebaseUser.email || "",
+          role: "student", // الدور الافتراضي
+          image: firebaseUser.photoURL || undefined,
+        };
+        
+        await setDoc(userDocRef, {
+          name: newUser.name,
+          email: newUser.email,
+          role: newUser.role,
+          image: newUser.image || null,
+          createdAt: new Date().toISOString(),
+        });
+        
+        setUser(newUser);
+        return newUser;
       }
     } catch (error) {
       console.error("Error loading user data:", error);
@@ -113,246 +88,33 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    // التحقق من الجلسة الحالية
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        loadUserData(session.user);
-      }
-      setLoading(false);
-    });
-
-    // الاستماع لتغييرات المصادقة
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user) {
-        await loadUserData(session.user);
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        await loadUserData(firebaseUser);
       } else {
         setUser(null);
       }
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => unsubscribe();
   }, []);
 
-  const login = async (
-    email: string,
-    password: string,
-    role?: UserRole,
-  ): Promise<{ success: boolean; error?: string }> => {
+  const loginWithGoogle = async (): Promise<{ success: boolean; error?: string }> => {
     try {
       setLoading(true);
-
-      // إنشاء timeout للعملية
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 ثانية
-
-      try {
-        // تسجيل الدخول عبر Supabase Auth
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-
-        clearTimeout(timeoutId);
-
-        if (error) throw error;
-
-        if (data.user) {
-          const userData = await loadUserData(data.user);
-
-          if (userData) {
-            // ✅ التحقق من نوع الحساب (Role Validation)
-            if (role && userData.role !== role) {
-              // تسجيل الخروج لأن النوع غير متطابق
-              await supabase.auth.signOut();
-              setUser(null);
-
-              // رسائل واضحة حسب نوع الحساب
-              const roleNames = {
-                student: "طالب",
-                professor: "أستاذ",
-                admin: "مدير",
-              };
-
-              const currentRoleName = roleNames[userData.role];
-              const attemptedRoleName = roleNames[role];
-
-              return {
-                success: false,
-                error: `هذا الحساب مسجل كـ "${currentRoleName}". يرجى تسجيل الدخول من واجهة ${currentRoleName === "طالب" ? "الطلاب" : currentRoleName === "أستاذ" ? "الأساتذة" : "المدراء"}.`,
-              };
-            }
-
-            return { success: true };
-          } else {
-            const fallbackUser = mapAuthUserToLocalUser(
-              data.user,
-              role || "student",
-            );
-            setUser(fallbackUser);
-            return { success: true };
-          }
-        }
-
-        return {
-          success: false,
-          error: "بيانات الاعتماد غير صحيحة",
-        };
-      } catch (timeoutError: any) {
-        clearTimeout(timeoutId);
-        if (timeoutError.name === "AbortError") {
-          throw new Error(
-            "انتهت مهلة الانتظار. تحقق من الاتصال بالإنترنت وحاول مرة أخرى.",
-          );
-        }
-        throw timeoutError;
-      }
-    } catch (error: any) {
-      console.error("Login error:", error);
-      let errorMessage = "حدث خطأ أثناء تسجيل الدخول";
-
-      if (
-        error.message === "Invalid login credentials" ||
-        error.message?.includes("Invalid")
-      ) {
-        errorMessage = "البريد الإلكتروني أو كلمة المرور غير صحيحة";
-      } else if (error.message?.includes("Email not confirmed")) {
-        errorMessage =
-          "حسابك قيد التفعيل. يرجى الانتظار لحظات ثم المحاولة مرة أخرى";
-      } else if (error.message?.includes("انتهت مهلة الانتظار")) {
-        errorMessage = error.message;
-      } else if (error.message) {
-        errorMessage = error.message;
-      }
-
-      return { success: false, error: errorMessage };
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const register = async (
-    name: string,
-    email: string,
-    password: string,
-    role: UserRole,
-  ): Promise<{ success: boolean; error?: string }> => {
-    try {
-      setLoading(true);
-
-      // إنشاء حساب مستخدم جديد في Supabase Auth
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: undefined,
-          data: {
-            name,
-            user_type: role,
-          },
-        },
-      });
-
-      if (error) throw error;
-
-      if (data.user) {
-        let session = data.session;
-
-        // إذا لم توجد جلسة، نحاول تسجيل الدخول مباشرة
-        if (!session) {
-          const { data: loginData, error: loginError } =
-            await supabase.auth.signInWithPassword({
-              email,
-              password,
-            });
-
-          if (loginError) {
-            return {
-              success: false,
-              error:
-                "تم إنشاء الحساب لكن فشل تسجيل الدخول الفوري. يرجى محاولة تسجيل الدخول يدوياً.",
-            };
-          }
-
-          session = loginData.session;
-        }
-
-        // انتظار قليل للسماح بتنفيذ triggers
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-
-        // محاولة تحميل بيانات المستخدم من قاعدة البيانات
-        try {
-          const { data: userData, error: fetchError } = await supabase
-            .from("users")
-            .select("*")
-            .eq("id", data.user.id!)
-            .single();
-
-          if (userData) {
-            setUser({
-              id: userData.id,
-              name: userData.name || name,
-              email: userData.email || data.user.email!,
-              role: (userData.user_type as UserRole) || role,
-            });
-          } else {
-            // إذا لم يتم العثور على السجل، حاول إنشاؤه
-            const { error: insertError } = await supabase.from("users").insert({
-              id: data.user.id,
-              email: data.user.email!,
-              name: name,
-              user_type: role,
-            });
-
-            if (insertError) {
-              console.error("Insert error:", insertError);
-              // لا نرمي خطأ هنا - قد يكون السجل موجود بالفعل من trigger
-            }
-
-            setUser({
-              id: data.user.id,
-              name: name,
-              email: data.user.email!,
-              role: role,
-            });
-          }
-        } catch (error: any) {
-          console.error("Error loading user data:", error);
-          // استخدم البيانات الأساسية على أي حال
-          setUser({
-            id: data.user.id,
-            name: name,
-            email: data.user.email!,
-            role: role,
-          });
-        }
-
+      const result = await signInWithPopup(auth, googleProvider);
+      if (result.user) {
+        await loadUserData(result.user);
         return { success: true };
       }
-
-      return { success: false, error: "فشل إنشاء الحساب" };
+      return { success: false, error: "فشل تسجيل الدخول" };
     } catch (error: any) {
-      console.error("Registration error:", error);
-
-      let errorMessage = "حدث خطأ أثناء إنشاء الحساب";
-
-      if (
-        error.message?.includes("already registered") ||
-        error.message?.includes("User already registered")
-      ) {
-        errorMessage = "البريد الإلكتروني مستخدم بالفعل";
-      } else if (error.message?.includes("Email rate limit")) {
-        errorMessage = "تم إرسال عدد كبير من الطلبات. يرجى الانتظار قليلاً";
-      } else if (error.message?.includes("Password")) {
-        errorMessage = "كلمة المرور يجب أن تكون 6 أحرف على الأقل";
-      } else if (error.message?.includes("Invalid email")) {
-        errorMessage = "البريد الإلكتروني غير صحيح";
-      } else if (error.message) {
-        errorMessage = error.message;
+      console.error("Google login error:", error);
+      let errorMessage = "حدث خطأ أثناء تسجيل الدخول باستخدام قوقل";
+      if (error.code === 'auth/popup-closed-by-user') {
+        errorMessage = "تم إغلاق نافذة تسجيل الدخول قبل اكتمال العملية";
       }
-
       return { success: false, error: errorMessage };
     } finally {
       setLoading(false);
@@ -362,10 +124,52 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const logout = async (): Promise<void> => {
     try {
       setLoading(true);
-      await supabase.auth.signOut();
+      await signOut(auth);
       setUser(null);
     } catch (error) {
       console.error("Logout error:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const register = async (name: string, email: string, password: string, role: UserRole): Promise<{ success: boolean; error?: string }> => {
+    try {
+      setLoading(true);
+      const result = await createUserWithEmailAndPassword(auth, email, password);
+      
+      if (result.user) {
+        const newUser: User = {
+          id: result.user.uid,
+          name,
+          email,
+          role,
+        };
+
+        const userDocRef = doc(db, "users", result.user.uid);
+        await setDoc(userDocRef, {
+          name,
+          email,
+          role,
+          createdAt: new Date().toISOString(),
+          image: null
+        });
+
+        setUser(newUser);
+        return { success: true };
+      }
+      return { success: false, error: "فشل إنشاء الحساب" };
+    } catch (error: any) {
+      console.error("Registration error:", error);
+      let errorMessage = "حدث خطأ أثناء إنشاء الحساب";
+      if (error.code === 'auth/email-already-in-use') {
+        errorMessage = "هذا البريد الإلكتروني مستخدم بالفعل";
+      } else if (error.code === 'auth/invalid-email') {
+        errorMessage = "البريد الإلكتروني غير صالح";
+      } else if (error.code === 'auth/weak-password') {
+        errorMessage = "كلمة المرور ضعيفة جداً";
+      }
+      return { success: false, error: errorMessage };
     } finally {
       setLoading(false);
     }
@@ -375,15 +179,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     if (!user) return;
 
     try {
-      const { error } = await supabase
-        .from("users")
-        .update({
-          name: userData.name,
-          user_type: userData.role,
-        })
-        .eq("id", user.id);
-
-      if (error) throw error;
+      const userDocRef = doc(db, "users", user.id);
+      await updateDoc(userDocRef, {
+        name: userData.name,
+        role: userData.role,
+        image: userData.image,
+      });
 
       setUser({ ...user, ...userData });
     } catch (error) {
@@ -395,9 +196,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     <UserContext.Provider
       value={{
         user,
-        login,
-        logout,
         register,
+        loginWithGoogle,
+        logout,
         updateUser,
         isAuthenticated: !!user,
         loading,
@@ -411,16 +212,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 export function useUser() {
   const context = useContext(UserContext);
   if (context === undefined) {
-    // Return default values during SSR/build time
     if (typeof window === "undefined") {
       return {
         user: null,
-        login: async () => ({ success: false, error: "Server side rendering" }),
+        register: async () => ({ success: false, error: "Server side" }),
+        loginWithGoogle: async () => ({ success: false, error: "Server side" }),
         logout: async () => {},
-        register: async () => ({
-          success: false,
-          error: "Server side rendering",
-        }),
         updateUser: async () => {},
         isAuthenticated: false,
         loading: true,

@@ -1,11 +1,18 @@
 'use client'
 
 import { motion, AnimatePresence } from 'framer-motion'
-import { Search, Bell, Menu, Sun, Moon, X, MessageSquare, Clock, FileText, CheckCheck } from 'lucide-react'
+import { 
+  Search, Bell, Menu, Sun, Moon, X, 
+  MessageSquare, Clock, FileText, CheckCheck,
+  LogOut, User as UserIcon, Settings, Shield
+} from 'lucide-react'
 import { useTheme } from '@/contexts/ThemeContext'
+import { useUser } from '@/contexts/UserContext'
 import { useNotifications } from '@/contexts/NotificationContext'
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import Image from 'next/image'
+import Link from 'next/link'
 
 interface HeaderProps {
   onMenuClick: () => void
@@ -13,22 +20,35 @@ interface HeaderProps {
 
 export default function Header({ onMenuClick }: HeaderProps) {
   const { theme, toggleTheme } = useTheme()
+  const { user, logout } = useUser()
   const { notifications, unreadCount, markAsRead, markAllAsRead, deleteNotification } = useNotifications()
+  
   const [showNotifications, setShowNotifications] = useState(false)
+  const [showUserMenu, setShowUserMenu] = useState(false)
+  
   const notificationRef = useRef<HTMLDivElement>(null)
+  const userMenuRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
 
-  // إغلاق القائمة عند النقر خارجها
+  // إغلاق القوائم عند النقر خارجها
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (notificationRef.current && !notificationRef.current.contains(event.target as Node)) {
         setShowNotifications(false)
+      }
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setShowUserMenu(false)
       }
     }
 
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
+
+  const handleLogout = async () => {
+    await logout()
+    router.push('/login')
+  }
 
   const getNotificationIcon = (type: string) => {
     switch (type) {
@@ -57,27 +77,32 @@ export default function Header({ onMenuClick }: HeaderProps) {
     return `منذ ${days} يوم`
   }
 
-  const handleNotificationClick = (notification: any) => {
-    markAsRead(notification.id)
-    if (notification.link) {
-      router.push(notification.link)
-      setShowNotifications(false)
-    }
-  }
-
   return (
     <header className="sticky top-0 z-30 bg-white/80 dark:bg-dark-card/80 backdrop-blur-md border-b border-medad-border dark:border-dark-border shadow-sm">
       <div className="px-4 md:px-6 py-3 md:py-4">
         <div className="flex items-center justify-between gap-2 md:gap-4">
-          {/* Search Bar - Hidden on mobile, shown on tablet+ */}
-          <div className="hidden md:flex flex-1 max-w-2xl">
-            <div className="relative w-full">
-              <Search className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input
-                type="text"
-                placeholder="ابحث في مصادرك، ملاحظاتك، أو اسأل المساعد الذكي..."
-                className="w-full pr-12 pl-4 py-3 bg-medad-paper dark:bg-dark-hover border border-medad-border dark:border-dark-border rounded-google focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all"
-              />
+          <div className="flex items-center gap-2 md:gap-4 flex-1">
+            {/* Menu Toggle Button - Now in Header */}
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={onMenuClick}
+              className="p-2.5 hover:bg-medad-hover dark:hover:bg-dark-hover rounded-google transition-colors border border-medad-border dark:border-dark-border shadow-sm bg-white dark:bg-dark-card"
+              title="القائمة الجانبية"
+            >
+              <Menu className="w-5 h-5 text-gray-600 dark:text-dark-text" />
+            </motion.button>
+
+            {/* Search Bar */}
+            <div className="hidden md:flex flex-1 max-w-2xl">
+              <div className="relative w-full">
+                <Search className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="ابحث في مصادرك، ملاحظاتك، أو اسأل المساعد الذكي..."
+                  className="w-full pr-12 pl-4 py-3 bg-medad-paper dark:bg-dark-hover border border-medad-border dark:border-dark-border rounded-google focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all"
+                />
+              </div>
             </div>
           </div>
           
@@ -91,7 +116,7 @@ export default function Header({ onMenuClick }: HeaderProps) {
           </motion.button>
 
           {/* Right Side Actions */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 md:gap-4">
             {/* Theme Toggle */}
             <motion.button
               whileHover={{ scale: 1.05 }}
@@ -127,7 +152,6 @@ export default function Header({ onMenuClick }: HeaderProps) {
                 )}
               </motion.button>
 
-              {/* Notification Panel */}
               <AnimatePresence>
                 {showNotifications && (
                   <motion.div
@@ -136,83 +160,121 @@ export default function Header({ onMenuClick }: HeaderProps) {
                     exit={{ opacity: 0, y: -10, scale: 0.95 }}
                     className="fixed md:absolute left-4 right-4 md:left-0 md:right-auto mt-2 md:w-96 bg-white dark:bg-dark-card rounded-lg shadow-2xl border border-medad-border dark:border-dark-border overflow-hidden z-50"
                   >
-                    {/* Header */}
                     <div className="flex items-center justify-between p-4 border-b border-medad-border dark:border-dark-border">
                       <div className="flex items-center gap-2">
                         <Bell className="w-5 h-5 text-medad-ink dark:text-dark-text" />
                         <h3 className="font-bold text-medad-ink dark:text-dark-text">الإشعارات</h3>
-                        {unreadCount > 0 && (
-                          <span className="px-2 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-xs font-bold rounded-full">
-                            {unreadCount}
-                          </span>
-                        )}
                       </div>
                       {unreadCount > 0 && (
-                        <button
-                          onClick={markAllAsRead}
-                          className="text-sm text-primary-600 dark:text-primary-400 hover:underline flex items-center gap-1"
-                        >
-                          <CheckCheck className="w-4 h-4" />
-                          <span className="hidden sm:inline">قراءة الكل</span>
-                        </button>
+                        <button onClick={markAllAsRead} className="text-sm text-primary-600 hover:underline">قراءة الكل</button>
                       )}
                     </div>
-
-                    {/* Notifications List */}
                     <div className="max-h-[400px] overflow-y-auto">
                       {notifications.length === 0 ? (
-                        <div className="p-8 text-center">
-                          <Bell className="w-12 h-12 mx-auto mb-3 text-gray-300 dark:text-dark-muted" />
-                          <p className="text-gray-500 dark:text-dark-muted">لا توجد إشعارات</p>
-                        </div>
+                        <div className="p-8 text-center text-gray-500">لا توجد إشعارات</div>
                       ) : (
-                        notifications.map((notification) => (
-                          <motion.div
-                            key={notification.id}
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            className={`p-4 border-b border-medad-border dark:border-dark-border last:border-b-0 cursor-pointer transition-colors ${
-                              !notification.read 
-                                ? 'bg-blue-50 dark:bg-blue-900/10 hover:bg-blue-100 dark:hover:bg-blue-900/20' 
-                                : 'hover:bg-medad-hover dark:hover:bg-dark-hover'
-                            }`}
-                            onClick={() => handleNotificationClick(notification)}
-                          >
+                        notifications.map((n) => (
+                          <div key={n.id} className="p-4 border-b border-medad-border dark:border-dark-border last:border-b-0 hover:bg-medad-hover dark:hover:bg-dark-hover cursor-pointer" onClick={() => { markAsRead(n.id); if(n.link) router.push(n.link); setShowNotifications(false); }}>
                             <div className="flex gap-3">
-                              <div className="flex-shrink-0 mt-1">
-                                {getNotificationIcon(notification.type)}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-start justify-between gap-2 mb-1">
-                                  <h4 className="font-semibold text-medad-ink dark:text-dark-text">
-                                    {notification.title}
-                                  </h4>
-                                  {!notification.read && (
-                                    <span className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0 mt-1.5"></span>
-                                  )}
-                                </div>
-                                <p className="text-sm text-gray-600 dark:text-dark-muted mb-2">
-                                  {notification.message}
-                                </p>
-                                <div className="flex items-center justify-between">
-                                  <span className="text-xs text-gray-500 dark:text-dark-muted">
-                                    {formatTimestamp(notification.timestamp)}
-                                  </span>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      deleteNotification(notification.id)
-                                    }}
-                                    className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded transition-colors"
-                                  >
-                                    <X className="w-4 h-4 text-gray-400 hover:text-red-500" />
-                                  </button>
-                                </div>
+                              {getNotificationIcon(n.type)}
+                              <div>
+                                <h4 className="font-semibold text-sm">{n.title}</h4>
+                                <p className="text-xs text-gray-600 dark:text-dark-muted">{n.message}</p>
+                                <span className="text-[10px] text-gray-400">{formatTimestamp(n.timestamp)}</span>
                               </div>
                             </div>
-                          </motion.div>
+                          </div>
                         ))
                       )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* User Profile Dropdown */}
+            <div className="relative" ref={userMenuRef}>
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setShowUserMenu(!showUserMenu)}
+                className="flex items-center gap-2 p-1 md:pr-4 md:pl-1 hover:bg-medad-hover dark:hover:bg-dark-hover rounded-full border border-medad-border dark:border-dark-border transition-all group"
+              >
+                <div className="hidden md:block text-right">
+                  <p className="text-xs font-bold text-medad-ink dark:text-dark-text truncate max-w-[120px]">
+                    {user?.name}
+                  </p>
+                  <p className="text-[10px] text-gray-500 dark:text-dark-muted">
+                    {user?.role === 'admin' ? 'مدير' : user?.role === 'professor' ? 'أستاذ' : 'طالب'}
+                  </p>
+                </div>
+                <div className="relative w-9 h-9 md:w-10 md:h-10 rounded-full overflow-hidden border-2 border-primary-500 shadow-sm group-hover:border-primary-600 transition-colors">
+                  {user?.image ? (
+                    <Image
+                      src={user.image}
+                      alt={user.name || 'User'}
+                      fill
+                      className="object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-primary-100 flex items-center justify-center">
+                      <UserIcon className="w-6 h-6 text-primary-600" />
+                    </div>
+                  )}
+                </div>
+              </motion.button>
+
+              <AnimatePresence>
+                {showUserMenu && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                    className="absolute left-0 mt-2 w-64 bg-white dark:bg-dark-card rounded-2xl shadow-2xl border border-medad-border dark:border-dark-border overflow-hidden z-50"
+                  >
+                    <div className="p-4 bg-gradient-to-br from-primary-50 to-white dark:from-dark-hover dark:to-dark-card border-b border-medad-border dark:border-dark-border text-center">
+                      <div className="relative w-16 h-16 mx-auto mb-3 rounded-full overflow-hidden border-2 border-primary-500">
+                        {user?.image ? (
+                          <Image src={user.image} alt={user.name} fill className="object-cover" />
+                        ) : (
+                          <div className="w-full h-full bg-primary-100 flex items-center justify-center">
+                            <UserIcon className="w-8 h-8 text-primary-600" />
+                          </div>
+                        )}
+                      </div>
+                      <h4 className="font-bold text-medad-ink dark:text-dark-text">{user?.name}</h4>
+                      <p className="text-xs text-gray-500 dark:text-dark-muted decoration-none">{user?.email}</p>
+                    </div>
+
+                    <div className="p-2">
+                      <Link 
+                        href="/dashboard/settings"
+                        onClick={() => setShowUserMenu(false)}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-700 dark:text-dark-text hover:bg-medad-hover dark:hover:bg-dark-hover rounded-xl transition-colors"
+                      >
+                        <Settings className="w-4 h-4" />
+                        الإعدادات
+                      </Link>
+                      {user?.role === 'admin' && (
+                        <Link 
+                          href="/dashboard/admin"
+                          onClick={() => setShowUserMenu(false)}
+                          className="w-full flex items-center gap-3 px-4 py-3 text-sm text-gray-700 dark:text-dark-text hover:bg-medad-hover dark:hover:bg-dark-hover rounded-xl transition-colors"
+                        >
+                          <Shield className="w-4 h-4" />
+                          لوحة التحكم
+                        </Link>
+                      )}
+                      
+                      <div className="h-px bg-medad-border dark:bg-dark-border my-2 mx-2" />
+                      
+                      <button 
+                        onClick={handleLogout}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/10 rounded-xl transition-colors"
+                      >
+                        <LogOut className="w-4 h-4" />
+                        تسجيل الخروج
+                      </button>
                     </div>
                   </motion.div>
                 )}

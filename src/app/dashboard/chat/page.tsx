@@ -29,7 +29,20 @@ import {
 import { useUser, type User } from "@/contexts/UserContext";
 import UserSearchModal from "@/components/UserSearchModal";
 import { useNotifications } from "@/contexts/NotificationContext";
-import { saveUserData, loadUserData } from "@/lib/userDataManager";
+import { db } from "@/lib/firebase";
+import { 
+  collection, 
+  query, 
+  where, 
+  onSnapshot, 
+  orderBy, 
+  addDoc, 
+  Timestamp, 
+  doc, 
+  updateDoc,
+  limit,
+  getDocs
+} from "firebase/firestore";
 
 type ContactType = "supervisor" | "assistant" | "group" | "student";
 type MessageStatus = "sent" | "delivered" | "read";
@@ -49,7 +62,7 @@ interface Message {
 }
 
 interface Conversation {
-  id: number;
+  id: string; // Changed to string for Firestore IDs
   name: string;
   role: string;
   type: ContactType;
@@ -61,6 +74,7 @@ interface Conversation {
   pinned?: boolean;
   muted?: boolean;
   messages: Message[];
+  participants?: string[];
 }
 
 export default function ChatPage() {
@@ -68,7 +82,7 @@ export default function ChatPage() {
   const { user: currentUser } = useUser();
   const { addNotification } = useNotifications();
   const [message, setMessage] = useState("");
-  const [selectedChat, setSelectedChat] = useState<number | null>(null);
+  const [selectedChat, setSelectedChat] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState<"all" | ContactType>("all");
   const [isTyping, setIsTyping] = useState(false);
@@ -78,193 +92,172 @@ export default function ChatPage() {
   // ✅ البدء بقائمة فارغة - سيتم تحميل المحادثات من localStorage أو قاعدة البيانات
   const [conversations, setConversations] = useState<Conversation[]>([]);
 
-  // Load messages from localStorage on mount
+  // ✅ تحميل المحادثات من Firestore في الوقت الفعلي
   useEffect(() => {
-    const savedConversations = localStorage.getItem("chatConversations");
-    if (savedConversations) {
-      try {
-        setConversations(JSON.parse(savedConversations));
-      } catch (error) {
-        console.error("Error loading conversations:", error);
-      }
-    }
-  }, []);
+    if (!currentUser?.id) return;
 
-  // Save conversations to localStorage whenever they change
-  useEffect(() => {
-    if (conversations.length > 0) {
-      localStorage.setItem("chatConversations", JSON.stringify(conversations));
-    }
-  }, [conversations]);
-
-  // Scroll to bottom when messages change
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [selectedChat, conversations]);
-
-  const handleAddUser = (selectedUser: User) => {
-    // التحقق من عدم وجود محادثة مسبقة
-    const existingChat = conversations.find(
-      (conv) => conv.name === selectedUser.name,
+    const q = query(
+      collection(db, "conversations"),
+      where("participants", "array-contains", currentUser.id),
+      orderBy("updated_at", "desc")
     );
 
-    if (existingChat) {
-      setSelectedChat(existingChat.id);
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      const convList = await Promise.all(snapshot.docs.map(async (d) => {
+        const data = d.data();
+        
+        // جلب بيانات الطرف الآخر
+        const otherId = data.participants.find((p: string) => p !== currentUser.id);
+        let otherUser: any = null;
+        
+        if (otherId) {
+          const userDoc = await getDocs(query(collection(db, "users"), where("id", "==", otherId)));
+          if (!userDoc.empty) {
+            otherUser = userDoc.docs[0].data();
+          }
+        }
+
+        return {
+          id: d.id,
+          name: otherUser?.name || "مستخدم",
+          role: otherUser?.role === 'professor' ? "مشرف البحث" : "طالب",
+          type: otherUser?.role === 'professor' ? "supervisor" : "student",
+          avatar: otherUser?.name?.charAt(0) || "م",
+          lastMessage: data.lastMessage || "",
+          time: data.updated_at?.toDate().toLocaleTimeString("ar-SA", { hour: '2-digit', minute: '2-digit' }) || "",
+          unread: 0,
+          online: true,
+          pinned: data.pinned_by?.includes(currentUser.id),
+          messages: [],
+          participants: data.participants
+        } as Conversation;
+      }));
+
+      setConversations(convList);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser?.id]);
+
+  // ✅ تحميل الرسائل للمحادثة المختارة في الوقت الفعلي
+  const [messages, setMessages] = useState<Message[]>([]);
+  useEffect(() => {
+    if (!selectedChat) return;
+
+    const q = query(
+      collection(db, "conversations", selectedChat.toString(), "messages"),
+      orderBy("created_at", "asc")
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const msgList: Message[] = snapshot.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id as any,
+          sender: data.sender_id === currentUser?.id ? "me" : "other",
+          text: data.text,
+          time: data.created_at?.toDate().toLocaleTimeString("ar-SA", { hour: '2-digit', minute: '2-digit' }) || "",
+          status: data.status,
+          senderName: data.sender_name
+        };
+      });
+      setMessages(msgList);
+    });
+
+    return () => unsubscribe();
+  }, [selectedChat, currentUser?.id]);
+
+  // Scroll to bottom
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isTyping]);
+
+  const handleAddUser = async (selectedUser: User) => {
+    if (!currentUser?.id) return;
+
+    // التحقق من وجود محادثة مسبقة في Firestore
+    const q = query(
+      collection(db, "conversations"),
+      where("participants", "array-contains", currentUser.id)
+    );
+    
+    const querySnapshot = await getDocs(q);
+    const existing = querySnapshot.docs.find(d => 
+      d.data().participants.includes(selectedUser.id)
+    );
+
+    if (existing) {
+      setSelectedChat(existing.id as any);
+      setShowUserSearch(false);
       return;
     }
 
-    // إنشاء محادثة جديدة
-    const newConversation: Conversation = {
-      id: Date.now(),
-      name: selectedUser.name,
-      role: selectedUser.role === "professor" ? "مشرف البحث" : "طالب",
-      type: selectedUser.role === "professor" ? "supervisor" : "student",
-      avatar: selectedUser.name.charAt(0),
-      lastMessage: "ابدأ المحادثة...",
-      time: "الآن",
-      unread: 0,
-      online: true,
-      messages: [],
-    };
-
-    setConversations((prev) => [newConversation, ...prev]);
-    setSelectedChat(newConversation.id);
+    // إنشاء محادثة جديدة في Firestore
+    try {
+      const docRef = await addDoc(collection(db, "conversations"), {
+        participants: [currentUser.id, selectedUser.id],
+        updated_at: Timestamp.now(),
+        lastMessage: "ابدأ المحادثة...",
+        created_at: Timestamp.now()
+      });
+      setSelectedChat(docRef.id as any);
+      setShowUserSearch(false);
+    } catch (error) {
+      console.error("Error creating conversation:", error);
+    }
   };
 
-  const handleSend = () => {
-    if (message.trim() && selectedChat !== null) {
-      const now = new Date();
-      const timeString = now.toLocaleTimeString("ar-SA", {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-
-      const newMessage: Message = {
-        id: Date.now(),
-        sender: "me",
-        text: message.trim(),
-        time: timeString,
-        status: "sent",
-      };
-
-      setConversations((prev) =>
-        prev.map((conv) => {
-          if (conv.id === selectedChat) {
-            return {
-              ...conv,
-              messages: [...conv.messages, newMessage],
-              lastMessage: message.trim(),
-              time: "الآن",
-              unread: 0,
-            };
-          }
-          return conv;
-        }),
-      );
-
+  const handleSend = async () => {
+    if (message.trim() && selectedChat && currentUser?.id) {
+      const chatMsg = message.trim();
       setMessage("");
 
-      // Simulate message delivery
-      setTimeout(() => {
-        setConversations((prev) =>
-          prev.map((conv) => {
-            if (conv.id === selectedChat) {
-              return {
-                ...conv,
-                messages: conv.messages.map((msg) =>
-                  msg.id === newMessage.id
-                    ? { ...msg, status: "delivered" }
-                    : msg,
-                ),
-              };
-            }
-            return conv;
-          }),
-        );
-      }, 1000);
+      try {
+        const messagesRef = collection(db, "conversations", selectedChat.toString(), "messages");
+        await addDoc(messagesRef, {
+          sender_id: currentUser.id,
+          text: chatMsg,
+          created_at: Timestamp.now(),
+          status: "sent"
+        });
 
-      // Simulate auto-reply from supervisor
-      if (selectedChat === 1) {
-        setTimeout(() => {
-          setIsTyping(true);
-        }, 2000);
-
-        setTimeout(() => {
-          const autoReply: Message = {
-            id: Date.now() + 1,
-            sender: "other",
-            text: "شكراً على التواصل، سأراجع ما أرسلته وأرد عليك قريباً",
-            time: new Date().toLocaleTimeString("ar-SA", {
-              hour: "2-digit",
-              minute: "2-digit",
-            }),
-            status: "read",
-          };
-
-          setConversations((prev) =>
-            prev.map((conv) => {
-              if (conv.id === selectedChat) {
-                // إضافة إشعار عند استقبال رسالة جديدة
-                addNotification({
-                  type: "message",
-                  title: "رسالة جديدة من د. محمد العلي",
-                  message: autoReply.text,
-                  link: "/dashboard/chat",
-                });
-
-                return {
-                  ...conv,
-                  messages: [...conv.messages, autoReply],
-                  lastMessage: autoReply.text,
-                  time: "الآن",
-                };
-              }
-              return conv;
-            }),
-          );
-          setIsTyping(false);
-
-          // Mark messages as read
-          setTimeout(() => {
-            setConversations((prev) =>
-              prev.map((conv) => {
-                if (conv.id === selectedChat) {
-                  return {
-                    ...conv,
-                    messages: conv.messages.map((msg) =>
-                      msg.sender === "me" ? { ...msg, status: "read" } : msg,
-                    ),
-                  };
-                }
-                return conv;
-              }),
-            );
-          }, 1000);
-        }, 4000);
+        const convRef = doc(db, "conversations", selectedChat.toString());
+        await updateDoc(convRef, {
+          lastMessage: chatMsg,
+          updated_at: Timestamp.now()
+        });
+      } catch (error) {
+        console.error("Error sending message:", error);
       }
     }
   };
 
-  const handlePinConversation = (id: number) => {
-    setConversations((prev) =>
-      prev.map((conv) =>
-        conv.id === id ? { ...conv, pinned: !conv.pinned } : conv,
-      ),
-    );
+  const handlePinConversation = async (id: string) => {
+    if (!currentUser?.id) return;
+    try {
+      const convRef = doc(db, "conversations", id);
+      const conv = conversations.find(c => c.id === id);
+      const pinnedBy = conv?.pinned ? [] : [currentUser.id]; // Simplified for now
+      await updateDoc(convRef, { pinned_by: pinnedBy });
+    } catch (error) {
+      console.error("Error pinning conversation:", error);
+    }
   };
 
-  const handleMuteConversation = (id: number) => {
-    setConversations((prev) =>
-      prev.map((conv) =>
-        conv.id === id ? { ...conv, muted: !conv.muted } : conv,
-      ),
-    );
+  const handleMuteConversation = async (id: string) => {
+    if (!currentUser?.id) return;
+    try {
+      const convRef = doc(db, "conversations", id);
+      const conv = conversations.find(c => c.id === id);
+      const mutedBy = conv?.muted ? [] : [currentUser.id];
+      await updateDoc(convRef, { muted_by: mutedBy });
+    } catch (error) {
+      console.error("Error muting conversation:", error);
+    }
   };
 
-  const markAsRead = (id: number) => {
-    setConversations((prev) =>
-      prev.map((conv) => (conv.id === id ? { ...conv, unread: 0 } : conv)),
-    );
+  const markAsRead = async (id: string) => {
+    // Implement read status in Firestore if needed
   };
 
   const filteredConversations = conversations
@@ -586,7 +579,7 @@ export default function ChatPage() {
             {/* Messages */}
             <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-medad-paper dark:bg-dark-bg min-h-0">
               <AnimatePresence>
-                {selectedConversation.messages.map((msg) => (
+                {messages.map((msg) => (
                   <motion.div
                     key={msg.id}
                     initial={{ opacity: 0, y: 10 }}
@@ -607,7 +600,7 @@ export default function ChatPage() {
                             : "bg-white dark:bg-dark-card text-medad-ink dark:text-dark-text rounded-bl-sm shadow-sm border border-medad-border dark:border-dark-border"
                         }`}
                       >
-                        <p className="text-sm leading-relaxed break-words">
+                        <p className="text-sm leading-relaxed break-words" dir="auto">
                           {msg.text}
                         </p>
                         <div className="flex items-center justify-end gap-2 mt-2">
@@ -695,7 +688,8 @@ export default function ChatPage() {
                   }}
                   placeholder="اكتب رسالتك... (Shift + Enter لسطر جديد)"
                   rows={1}
-                  className="flex-1 px-4 py-2.5 bg-medad-paper dark:bg-dark-hover border border-medad-border dark:border-dark-border rounded-google focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none max-h-32 text-sm"
+                  dir="auto"
+                  className="flex-1 px-4 py-2.5 bg-medad-paper dark:bg-dark-hover border border-medad-border dark:border-dark-border rounded-google focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none max-h-32 text-sm text-right rtl:text-right ltr:text-left"
                   style={{ minHeight: "40px" }}
                 />
                 <motion.button

@@ -23,6 +23,7 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useUser } from "@/contexts/UserContext";
+import Image from "next/image";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -224,8 +225,18 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
             whileHover={{ scale: 1.02 }}
             className="flex items-center gap-3 p-3 bg-medad-paper dark:bg-dark-hover rounded-google cursor-pointer hover:bg-medad-hover dark:hover:bg-dark-border transition-all"
           >
-            <div className="w-10 h-10 bg-gradient-to-br from-primary-400 to-primary-600 rounded-full flex items-center justify-center text-white font-bold">
-              {user?.name?.charAt(0) || "ض"}
+            <div className="w-10 h-10 bg-gradient-to-br from-primary-400 to-primary-600 rounded-full flex items-center justify-center text-white font-bold overflow-hidden shadow-sm border border-white/20 relative">
+              {user?.image ? (
+                <Image 
+                  src={user.image} 
+                  alt={user.name} 
+                  fill
+                  className="object-cover"
+                  unoptimized // جوجل بروفايل أحياناً يحتاج unoptimized لتجنب مشاكل النطاقات
+                />
+              ) : (
+                user?.name?.charAt(0) || "ض"
+              )}
             </div>
             <div className="flex-1 min-w-0">
               <p className="font-semibold text-medad-ink dark:text-dark-text text-sm truncate">

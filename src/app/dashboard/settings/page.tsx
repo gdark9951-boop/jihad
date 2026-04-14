@@ -22,6 +22,7 @@ import {
 import { useTheme } from '@/contexts/ThemeContext'
 import { useUser } from '@/contexts/UserContext'
 import { saveUserData, loadUserData } from '@/lib/userDataManager'
+import Image from 'next/image'
 
 interface UserSettings {
   firstName: string
@@ -49,9 +50,9 @@ export default function SettingsPage() {
   const { theme, setTheme } = useTheme()
   
   const [settings, setSettings] = useState<UserSettings>({
-    firstName: 'أحمد',
-    lastName: 'محمد',
-    email: 'ahmed.mohammed@university.edu',
+    firstName: currentUser?.name?.split(' ')[0] || '',
+    lastName: currentUser?.name?.split(' ').slice(1).join(' ') || '',
+    email: currentUser?.email || '',
     major: 'هندسة البرمجيات',
     studentId: '2020123456',
     notifications: {
@@ -64,6 +65,18 @@ export default function SettingsPage() {
     language: 'ar',
     twoFactor: false
   })
+
+  // ✅ التزامن مع بيانات المستخدم عند التحميل
+  useEffect(() => {
+    if (currentUser) {
+      setSettings(prev => ({
+        ...prev,
+        firstName: currentUser.name?.split(' ')[0] || prev.firstName,
+        lastName: currentUser.name?.split(' ').slice(1).join(' ') || prev.lastName,
+        email: currentUser.email || prev.email
+      }))
+    }
+  }, [currentUser])
 
   const [passwords, setPasswords] = useState({
     current: '',
@@ -218,8 +231,19 @@ export default function SettingsPage() {
 
               {/* Profile Photo */}
               <div className="flex items-center gap-6 p-6 bg-medad-paper dark:bg-dark-hover rounded-google">
-                <div className="w-20 h-20 bg-gradient-to-br from-primary-400 to-primary-600 rounded-full flex items-center justify-center text-white text-3xl font-bold">
-                  {settings.firstName.charAt(0)}
+                <div className="relative w-24 h-24 rounded-full overflow-hidden border-4 border-white dark:border-dark-card shadow-lg flex-shrink-0">
+                  {currentUser?.image ? (
+                    <Image 
+                      src={currentUser.image} 
+                      alt={currentUser.name} 
+                      fill 
+                      className="object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white text-3xl font-bold">
+                      {settings.firstName.charAt(0)}
+                    </div>
+                  )}
                 </div>
                 <div className="flex-1">
                   <h3 className="font-bold text-medad-ink dark:text-dark-text mb-2">صورة الملف الشخصي</h3>

@@ -1,52 +1,40 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
+import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
-  Mail,
-  Lock,
-  Eye,
-  EyeOff,
   BookOpen,
   Sparkles,
   GraduationCap,
 } from "lucide-react";
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useUser } from "@/contexts/UserContext";
 
 export default function LoginPageClient() {
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get("redirect") || "/dashboard";
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [userType, setUserType] = useState<"student" | "professor" | "admin">(
-    "student",
-  );
   const [error, setError] = useState("");
   const router = useRouter();
-  const { login } = useUser();
+  const { loginWithGoogle } = useUser();
 
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleGoogleLogin = async () => {
     if (isSubmitting) return;
 
     setIsSubmitting(true);
     setError("");
 
     try {
-      const result = await login(email, password, userType);
+      const result = await loginWithGoogle();
 
       if (result.success) {
         router.push(redirectTo);
       } else {
-        setError(result.error || "البريد الإلكتروني أو كلمة المرور غير صحيحة");
+        setError(result.error || "فشل تسجيل الدخول باستخدام قوقل");
       }
     } catch (err) {
       console.error("Login error:", err);
-      setError("حدث خطأ أثناء تسجيل الدخول. يرجى المحاولة مرة أخرى.");
+      setError("حدث خطأ غير متوقع. يرجى المحاولة مرة أخرى.");
     } finally {
       setIsSubmitting(false);
     }
@@ -175,177 +163,66 @@ export default function LoginPageClient() {
         {/* القسم الأيسر - نموذج تسجيل الدخول */}
         <motion.div
           variants={itemVariants}
-          className="bg-white dark:bg-dark-card rounded-[24px] shadow-google-lg dark:shadow-dark p-8 md:p-12 border border-medad-border dark:border-dark-border"
+          className="bg-white dark:bg-dark-card rounded-[24px] shadow-google-lg dark:shadow-dark p-8 md:p-12 border border-medad-border dark:border-dark-border flex flex-col justify-center"
         >
-          <motion.div variants={itemVariants} className="mb-8">
-            <h3 className="text-3xl font-bold text-medad-ink dark:text-dark-text mb-2">
-              مرحباً بعودتك
+          <motion.div variants={itemVariants} className="mb-12 text-center">
+            <h3 className="text-3xl font-bold text-medad-ink dark:text-dark-text mb-4">
+              مرحباً بك في مداد
             </h3>
             <p className="text-gray-600 dark:text-dark-muted">
-              قم بتسجيل الدخول للمتابعة
+              استخدم حساب قوقل الخاص بك للوصول إلى النظام
             </p>
           </motion.div>
 
-          {/* اختيار نوع المستخدم */}
-          <motion.div variants={itemVariants} className="mb-6">
-            <div className="grid grid-cols-3 gap-2 p-1 bg-medad-paper dark:bg-dark-hover rounded-google">
-              {[
-                { id: "student" as const, label: "طالب", icon: GraduationCap },
-                { id: "professor" as const, label: "أستاذ", icon: BookOpen },
-                { id: "admin" as const, label: "مدير", icon: Sparkles },
-              ].map((type) => (
-                <motion.button
-                  key={type.id}
-                  onClick={() => setUserType(type.id)}
-                  className={`py-2.5 px-4 rounded-md font-medium transition-all duration-200 flex items-center justify-center gap-2 ${
-                    userType === type.id
-                      ? "bg-white dark:bg-dark-bg text-primary-600 dark:text-primary-400 shadow-google dark:shadow-dark"
-                      : "text-gray-600 dark:text-dark-muted hover:text-medad-ink dark:hover:text-dark-text"
-                  }`}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                >
-                  <type.icon className="w-4 h-4" />
-                  <span>{type.label}</span>
-                </motion.button>
-              ))}
-            </div>
-          </motion.div>
-
-          <form onSubmit={handleLogin} className="space-y-5">
-            {/* حقل البريد الإلكتروني */}
-            <motion.div variants={itemVariants}>
-              <label className="block text-sm font-medium text-medad-ink dark:text-dark-text mb-2">
-                البريد الإلكتروني
-              </label>
-              <div className="relative">
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="input-field pr-12"
-                  placeholder="your.email@university.edu"
-                  disabled={isSubmitting}
-                  required
-                />
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          {/* زر تسجيل الدخول باستخدام قوقل */}
+          <motion.button
+            variants={itemVariants}
+            onClick={handleGoogleLogin}
+            disabled={isSubmitting}
+            className="relative flex items-center justify-center gap-4 px-8 py-4 bg-white dark:bg-dark-hover border-2 border-medad-border dark:border-dark-border rounded-google shadow-sm hover:shadow-google-lg dark:hover:shadow-dark text-medad-ink dark:text-dark-text font-bold text-lg transition-all duration-300 group overflow-hidden"
+            whileHover={{ scale: 1.02, y: -2 }}
+            whileTap={{ scale: 0.98 }}
+          >
+            {isSubmitting ? (
+              <div className="flex items-center gap-3">
+                <div className="w-5 h-5 border-2 border-primary-600 border-t-transparent rounded-full animate-spin"></div>
+                <span>جارٍ الاتصال...</span>
               </div>
-            </motion.div>
+            ) : (
+              <>
+                <svg className="w-6 h-6" viewBox="0 0 48 48">
+                  <path fill="#FFC107" d="M43.611,20.083H42V20H24v8h11.303c-1.649,4.657-6.08,8-11.303,8c-6.627,0-12-5.373-12-12c0-6.627,5.373-12,12-12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C12.955,4,4,12.955,4,24c0,11.045,8.955,20,20,20c11.045,0,20-8.955,20-20C44,22.659,43.862,21.35,43.611,20.083z" />
+                  <path fill="#FF3D00" d="M6.306,14.691l6.571,4.819C14.655,15.108,18.961,12,24,12c3.059,0,5.842,1.154,7.961,3.039l5.657-5.657C34.046,6.053,29.268,4,24,4C16.318,4,9.656,8.337,6.306,14.691z" />
+                  <path fill="#4CAF50" d="M24,44c5.166,0,9.86-1.977,13.409-5.192l-6.19-5.238C29.211,35.091,26.715,36,24,36c-5.202,0-9.619-3.317-11.283-7.946l-6.522,5.025C9.505,39.556,16.227,44,24,44z" />
+                  <path fill="#1976D2" d="M43.611,20.083H42V20H24v8h11.303c-0.792,2.237-2.231,4.166-4.087,5.571c0.001-0.001,0.002-0.001,0.003-0.002l6.19,5.238C36.971,39.205,44,34,44,24C44,22.659,43.862,21.35,43.611,20.083z" />
+                </svg>
+                <span>تسجيل الدخول باستخدام قوقل</span>
+              </>
+            )}
+          </motion.button>
 
-            {/* حقل كلمة المرور */}
-            <motion.div variants={itemVariants}>
-              <label className="block text-sm font-medium text-medad-ink dark:text-dark-text mb-2">
-                كلمة المرور
-              </label>
-              <div className="relative">
-                <input
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="input-field pr-12"
-                  placeholder="••••••••"
-                  disabled={isSubmitting}
-                  required
-                />
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  disabled={isSubmitting}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 dark:text-dark-muted hover:text-medad-ink dark:hover:text-dark-text transition-colors"
-                >
-                  {showPassword ? (
-                    <EyeOff className="w-5 h-5" />
-                  ) : (
-                    <Eye className="w-5 h-5" />
-                  )}
-                </button>
-              </div>
-            </motion.div>
-
-            {/* تذكرني ونسيت كلمة المرور */}
-            <motion.div
-              variants={itemVariants}
-              className="flex items-center justify-between"
-            >
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  className="w-4 h-4 text-primary-600 border-medad-border dark:border-dark-border rounded focus:ring-2 focus:ring-primary-500"
-                />
-                <span className="text-sm text-gray-600 dark:text-dark-muted">
-                  تذكرني
-                </span>
-              </label>
-              <Link
-                href="/forgot-password"
-                className="text-sm text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-500 font-medium transition-colors"
-              >
-                نسيت كلمة المرور؟
-              </Link>
-            </motion.div>
-
-            {/* رسالة الخطأ */}
+          {/* رسالة الخطأ */}
+          <AnimatePresence>
             {error && (
               <motion.div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-google text-red-600 dark:text-red-400 text-sm text-center"
+                exit={{ opacity: 0, y: -10 }}
+                className="mt-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-google text-red-600 dark:text-red-400 text-sm text-center"
               >
                 {error}
               </motion.div>
             )}
+          </AnimatePresence>
 
-            {/* زر تسجيل الدخول */}
-            <motion.button
-              variants={itemVariants}
-              type="submit"
-              disabled={isSubmitting}
-              className="btn-primary w-full text-lg disabled:opacity-70 disabled:cursor-not-allowed"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              {isSubmitting ? "جارٍ تسجيل الدخول..." : "تسجيل الدخول"}
-            </motion.button>
-
-            {/* حسابات تجريبية */}
-            <motion.div
-              variants={itemVariants}
-              className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-google"
-            >
-              <p className="text-xs font-medium text-blue-800 dark:text-blue-300 mb-2">
-                💡 معلومات التسجيل:
-              </p>
-              <div className="space-y-1 text-xs text-blue-700 dark:text-blue-400">
-                <p>• طالب: student@university.edu / 123456</p>
-                <p>• أستاذ: prof@university.edu / 123456</p>
-                <p>• مدير: admin@university.edu / 123456</p>
-                <p className="mt-2 text-blue-600 dark:text-blue-300 font-medium">
-                  ⚠️ إذا لم تعمل هذه الحسابات بدلاً من ذلك:
-                </p>
-                <Link
-                  href="/setup"
-                  className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-semibold underline inline-block mt-1"
-                >
-                  → أنشئ حسابًا جديدًا أو استخدم حسابات اختبارية
-                </Link>
-              </div>
-            </motion.div>
-
-            {/* رابط التسجيل */}
-            <motion.p
-              variants={itemVariants}
-              className="text-center text-gray-600 dark:text-dark-muted text-sm"
-            >
-              ليس لديك حساب؟{" "}
-              <Link
-                href="/register"
-                className="text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-500 font-medium transition-colors"
-              >
-                سجل الآن
-              </Link>
-            </motion.p>
-          </form>
+          <motion.div
+            variants={itemVariants}
+            className="mt-12 p-6 bg-primary-50 dark:bg-primary-900/10 border border-primary-100 dark:border-primary-800/30 rounded-google"
+          >
+            <p className="text-sm text-primary-800 dark:text-primary-300 leading-relaxed text-center font-medium">
+              سيتم إنشاء حسابك تلقائياً عند أول عملية تسجيل دخول إذا لم يكن لديك حساب مسبقاً.
+            </p>
+          </motion.div>
         </motion.div>
       </motion.div>
     </div>

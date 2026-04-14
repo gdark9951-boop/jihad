@@ -5,14 +5,24 @@ import React, {
   useContext,
   useState,
   useEffect,
+  useCallback,
   ReactNode,
 } from "react";
 import { useUser } from "./UserContext";
-import {
-  getUserNotifications,
-  markNotificationAsRead,
-} from "@/lib/supabaseData";
-import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/firebase";
+import { 
+  collection, 
+  query, 
+  where, 
+  onSnapshot, 
+  orderBy, 
+  doc, 
+  updateDoc, 
+  addDoc, 
+  Timestamp,
+  deleteDoc,
+  getDocs
+} from "firebase/firestore";
 
 export interface Notification {
   id: string;
@@ -54,27 +64,34 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [mounted, setMounted] = useState(false);
 
-  // ✅ تحميل الإشعارات من Supabase
-  const loadNotifications = async () => {
+  // ✅ تحميل الإشعارات من Firestore
+  const loadNotifications = useCallback(async () => {
     if (!user?.id) return;
 
-    const dbNotifications = await getUserNotifications(user.id);
-    if (dbNotifications && dbNotifications.length > 0) {
-      const mappedNotifications: Notification[] = dbNotifications.map((n) => ({
-        id: n.id || "",
-        type: (n.type as any) || "info",
-        title: n.title,
-        message: n.message,
-        timestamp: n.created_at || new Date().toISOString(),
-        read: n.is_read || false,
-      }));
+    try {
+      const q = query(
+        collection(db, "users", user.id, "notifications"),
+        orderBy("timestamp", "desc")
+      );
+      const querySnapshot = await getDocs(q);
+      const mappedNotifications: Notification[] = querySnapshot.docs.map((doc) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          type: data.type || "info",
+          title: data.title,
+          message: data.message,
+          timestamp: data.timestamp?.toDate().toISOString() || new Date().toISOString(),
+          read: data.read || false,
+          link: data.link
+        };
+      });
       setNotifications(mappedNotifications);
       setUnreadCount(mappedNotifications.filter((n) => !n.read).length);
-    } else {
-      setNotifications([]);
-      setUnreadCount(0);
+    } catch (error) {
+      console.error("Error loading notifications:", error);
     }
-  };
+  }, [user?.id]);
 
   // ✅ تحميل الإشعارات من Supabase عند تحميل المكون
   useEffect(() => {
@@ -84,57 +101,52 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     loadNotifications();
   }, [user?.id, loadNotifications]);
 
-  // ✅ الاستماع للتحديثات في الوقت الفعلي
+  // ✅ الاستماع للتحديثات في الوقت الفعلي من Firestore
   useEffect(() => {
     if (!user?.id) return;
 
-    const channel = supabase
-      .channel("notifications-changes")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "notifications",
-          filter: `user_id=eq.${user.id}`,
-        },
-        (payload) => {
-          loadNotifications();
-        },
-      )
-      .subscribe();
+    const q = query(
+      collection(db, "users", user.id, "notifications"),
+      orderBy("timestamp", "desc")
+    );
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user?.id, loadNotifications]);
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const mappedNotifications: Notification[] = snapshot.docs.map((doc) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          type: data.type || "info",
+          title: data.title,
+          message: data.message,
+          timestamp: data.timestamp?.toDate().toISOString() || new Date().toISOString(),
+          read: data.read || false,
+          link: data.link
+        };
+      });
+      setNotifications(mappedNotifications);
+      setUnreadCount(mappedNotifications.filter((n) => !n.read).length);
+    });
+
+    return () => unsubscribe();
+  }, [user?.id]);
 
   const addNotification = async (
     notification: Omit<Notification, "id" | "timestamp" | "read">,
   ) => {
     if (!user?.id) return;
 
-    // ✅ حفظ في Supabase
-    const { data, error } = await supabase
-      .from("notifications")
-      .insert({
-        user_id: user.id,
+    try {
+      await addDoc(collection(db, "users", user.id, "notifications"), {
         title: notification.title,
         message: notification.message,
-        type:
-          notification.type === "message" ||
-          notification.type === "deadline" ||
-          notification.type === "research" ||
-          notification.type === "system"
-            ? "info"
-            : notification.type,
-      })
-      .select()
-      .single();
-
-    if (error) {
+        type: notification.type,
+        link: notification.link,
+        read: false,
+        timestamp: Timestamp.now(),
+      });
+    } catch (error) {
       console.error("Error adding notification:", error);
-      // Fallback: add locally only
+      // Fallback local only
       const newNotification: Notification = {
         ...notification,
         id: Date.now().toString(),
@@ -143,8 +155,6 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       };
       setNotifications((prev) => [newNotification, ...prev]);
       setUnreadCount((prev) => prev + 1);
-    } else {
-      // سيتم تحديث القائمة تلقائياً من خلال realtime subscription
     }
 
     // إشعار متصفح
@@ -159,59 +169,55 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   const markAsRead = async (id: string) => {
     if (!user?.id) return;
 
-    // تحديث محلي فوري
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: true } : n)),
-    );
-    setUnreadCount((prev) => Math.max(0, prev - 1));
-
-    // ✅ تحديث في Supabase
-    await markNotificationAsRead(id, user.id);
+    // ✅ تحديث في Firestore
+    try {
+      const notificationRef = doc(db, "users", user.id, "notifications", id);
+      await updateDoc(notificationRef, { read: true });
+    } catch (error) {
+      console.error("Error marking notification as read:", error);
+    }
   };
 
   const markAllAsRead = async () => {
     if (!user?.id) return;
 
-    // تحديث محلي فوري
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-    setUnreadCount(0);
-
-    // ✅ تحديث كل الإشعارات في Supabase
-    const unreadIds = notifications.filter((n) => !n.read).map((n) => n.id);
-    for (const id of unreadIds) {
-      await markNotificationAsRead(id, user.id);
+    try {
+      const q = query(
+        collection(db, "users", user.id, "notifications"),
+        where("read", "==", false)
+      );
+      const querySnapshot = await getDocs(q);
+      const updatePromises = querySnapshot.docs.map((d) => 
+        updateDoc(d.ref, { read: true })
+      );
+      await Promise.all(updatePromises);
+    } catch (error) {
+      console.error("Error marking all notifications as read:", error);
     }
   };
 
   const deleteNotification = async (id: string) => {
     if (!user?.id) return;
 
-    const notification = notifications.find((n) => n.id === id);
-
-    // حذف محلي فوري
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
-
-    if (notification && !notification.read) {
-      setUnreadCount((prevCount) => Math.max(0, prevCount - 1));
+    try {
+      const notificationRef = doc(db, "users", user.id, "notifications", id);
+      await deleteDoc(notificationRef);
+    } catch (error) {
+      console.error("Error deleting notification:", error);
     }
-
-    // ✅ حذف من Supabase
-    await supabase
-      .from("notifications")
-      .delete()
-      .eq("id", id)
-      .eq("user_id", user.id);
   };
 
   const clearAll = async () => {
     if (!user?.id) return;
 
-    // مسح محلي فوري
-    setNotifications([]);
-    setUnreadCount(0);
-
-    // ✅ حذف كل الإشعارات من Supabase
-    await supabase.from("notifications").delete().eq("user_id", user.id);
+    try {
+      const q = query(collection(db, "users", user.id, "notifications"));
+      const querySnapshot = await getDocs(q);
+      const deletePromises = querySnapshot.docs.map((d) => deleteDoc(d.ref));
+      await Promise.all(deletePromises);
+    } catch (error) {
+      console.error("Error clearing notifications:", error);
+    }
   };
 
   return (

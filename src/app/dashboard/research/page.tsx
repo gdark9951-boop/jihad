@@ -29,7 +29,12 @@ import { Document, Packer, Paragraph, TextRun } from "docx";
 import { saveAs } from "file-saver";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { useUser } from "@/contexts/UserContext";
-import { getUserResearch, saveResearch } from "@/lib/supabaseData";
+import {
+  getUserResearch,
+  saveResearch,
+  getUserSources,
+  getUserTasks,
+} from "@/lib/firestoreData";
 
 interface ResearchData {
   title: string;
@@ -42,7 +47,7 @@ export default function ResearchPage() {
   const router = useRouter();
   const { user } = useUser();
   const { addNotification } = useNotifications();
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
   const [content, setContent] = useState("");
   const [wordCount, setWordCount] = useState(0);
   const [selectedText, setSelectedText] = useState("");
@@ -60,14 +65,20 @@ export default function ResearchPage() {
       const research = await getUserResearch(user.id);
       if (research) {
         setContent(research.content || "");
+        if (editorRef.current) {
+          editorRef.current.innerHTML = research.content || "";
+        }
         setWordCount(
-          research.content?.trim().split(/\s+/).filter(Boolean).length || 0,
+          research.content?.replace(/<[^>]*>/g, "").trim().split(/\s+/).filter(Boolean).length || 0,
         );
         setLastSaved(
           research.updated_at ? new Date(research.updated_at) : null,
         );
       } else {
         setContent("");
+        if (editorRef.current) {
+          editorRef.current.innerHTML = "";
+        }
         setWordCount(0);
         setLastSaved(null);
       }
@@ -271,53 +282,110 @@ export default function ResearchPage() {
     }
   };
 
-  const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const text = e.target.value;
-    setContent(text);
-    setWordCount(text.trim().split(/\s+/).filter(Boolean).length);
+  const handleContentChange = () => {
+    if (editorRef.current) {
+      const html = editorRef.current.innerHTML;
+      const text = editorRef.current.innerText;
+      setContent(html);
+      setWordCount(text.trim().split(/\s+/).filter(Boolean).length);
+    }
   };
 
   const handleTextSelection = () => {
-    if (textareaRef.current) {
-      const start = textareaRef.current.selectionStart;
-      const end = textareaRef.current.selectionEnd;
-      const selected = content.substring(start, end);
-      if (selected.trim()) {
-        setSelectedText(selected);
-      }
+    const selection = window.getSelection();
+    if (selection && selection.toString().trim()) {
+      setSelectedText(selection.toString());
+    }
+  };
+
+  const handleManualTrigger = () => {
+    const selection = window.getSelection();
+    const selected = selection ? selection.toString() : "";
+    
+    if (selected.trim()) {
+      setSelectedText(selected);
+      addNotification({
+        type: "research",
+        title: "تم تحديد النص",
+        message: "تم إرسال النص المحدد للمساعد الذكي",
+        link: "#",
+      });
+    } else if (editorRef.current?.innerText.trim()) {
+      setSelectedText(editorRef.current.innerText);
+      addNotification({
+        type: "research",
+        title: "تم تحديد النص بالكامل",
+        message: "تم إرسال النص بالكامل للمساعد الذكي",
+        link: "#",
+      });
     }
   };
 
   const handleApplySuggestion = (aiText: string) => {
-    if (!textareaRef.current) return;
+    if (!editorRef.current) return;
 
-    const start = textareaRef.current.selectionStart;
-    const end = textareaRef.current.selectionEnd;
-
-    // If text is selected, replace it
-    if (start !== end) {
-      const newContent =
-        content.substring(0, start) + aiText + content.substring(end);
-      setContent(newContent);
-      setWordCount(newContent.trim().split(/\s+/).filter(Boolean).length);
+    // Use insertText if possible to maintain selection context, or just append
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      range.deleteContents();
+      const textNode = document.createTextNode(aiText);
+      range.insertNode(textNode);
+      
+      // Update state
+      if (editorRef.current) {
+        setContent(editorRef.current.innerHTML);
+        setWordCount(editorRef.current.innerText.trim().split(/\s+/).filter(Boolean).length);
+      }
     } else {
-      // If no selection, append at current cursor position
-      const newContent =
-        content.substring(0, start) + aiText + content.substring(start);
+      const newContent = content + " " + aiText;
       setContent(newContent);
-      setWordCount(newContent.trim().split(/\s+/).filter(Boolean).length);
+      if (editorRef.current) {
+        editorRef.current.innerHTML = newContent;
+      }
     }
 
     setSelectedText("");
   };
 
+  const applyFormatting = (type: string) => {
+    if (!editorRef.current) return;
+    
+    document.execCommand('styleWithCSS', false, "true");
+
+    switch (type) {
+      case "bold":
+        document.execCommand("bold", false);
+        break;
+      case "italic":
+        document.execCommand("italic", false);
+        break;
+      case "list":
+        document.execCommand("insertUnorderedList", false);
+        break;
+      case "list-ordered":
+        document.execCommand("insertOrderedList", false);
+        break;
+      case "quote":
+        document.execCommand("formatBlock", false, "blockquote");
+        break;
+      case "code":
+        document.execCommand("formatBlock", false, "pre");
+        break;
+      default:
+        return;
+    }
+    
+    setContent(editorRef.current.innerHTML);
+  };
+
   const toolbarButtons = [
-    { icon: Bold, label: "غامق" },
-    { icon: Italic, label: "مائل" },
-    { icon: List, label: "قائمة" },
-    { icon: ListOrdered, label: "قائمة مرقمة" },
-    { icon: Quote, label: "اقتباس" },
-    { icon: Code, label: "كود" },
+    { id: "bold", icon: Bold, label: "غامق" },
+    { id: "italic", icon: Italic, label: "مائل" },
+    { id: "list", icon: List, label: "قائمة" },
+    { id: "list-ordered", icon: ListOrdered, label: "قائمة مرقمة" },
+    { id: "quote", icon: Quote, label: "اقتباس" },
+    { id: "code", icon: Code, label: "كود" },
   ];
 
   return (
@@ -468,6 +536,7 @@ export default function ResearchPage() {
                   key={index}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
+                  onClick={() => applyFormatting(btn.id)}
                   className="p-2 hover:bg-medad-hover dark:hover:bg-dark-hover rounded-lg transition-colors"
                   title={btn.label}
                 >
@@ -475,6 +544,16 @@ export default function ResearchPage() {
                 </motion.button>
               ))}
               <div className="h-6 w-px bg-medad-border dark:bg-dark-border mx-2"></div>
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={handleManualTrigger}
+                className="flex items-center gap-2 px-3 py-2 bg-primary-600 text-white rounded-lg hover:shadow-lg transition-all"
+                title="إرسال النص المكتوب للمساعد الذكي فوراً"
+              >
+                <Check className="w-4 h-4" />
+                <span className="text-sm font-medium">تأكيد النص</span>
+              </motion.button>
               <motion.button
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
@@ -487,17 +566,22 @@ export default function ResearchPage() {
           </div>
 
           {/* Editor */}
-          <div className="card p-8 min-h-[600px]">
-            <textarea
-              ref={textareaRef}
-              value={content}
-              onChange={handleContentChange}
-              onSelect={handleTextSelection}
+          <div className="card p-8 min-h-[600px] relative">
+            <div
+              ref={editorRef}
+              contentEditable
+              onInput={handleContentChange}
               onMouseUp={handleTextSelection}
-              placeholder="ابدأ الكتابة هنا... حدد أي نص واستخدم المساعد الذكي للحصول على اقتراحات وتحسينات."
-              className="w-full h-full min-h-[500px] outline-none resize-none text-lg leading-relaxed text-medad-ink dark:text-dark-text bg-transparent placeholder:text-gray-400 dark:placeholder:text-dark-muted"
+              onKeyUp={handleTextSelection}
+              className="w-full h-full min-h-[500px] outline-none text-lg leading-relaxed text-medad-ink dark:text-dark-text bg-transparent placeholder:text-gray-400 dark:placeholder:text-dark-muted proverb-editor"
               dir="rtl"
+              suppressContentEditableWarning={true}
             />
+            {!content && (
+              <div className="absolute top-8 right-8 text-gray-400 pointer-events-none">
+                ابدأ الكتابة هنا...
+              </div>
+            )}
           </div>
 
           {/* Stats Bar */}

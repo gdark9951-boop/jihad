@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import './globals.css'
 import Providers from '@/components/Providers'
+import MouseGlow from '@/components/MouseGlow'
 
 export const metadata: Metadata = {
   title: 'مداد - نظام إدارة أبحاث التخرج',
@@ -18,6 +19,7 @@ export default function RootLayout({
   return (
     <html lang="ar" dir="rtl" suppressHydrationWarning>
       <body className="antialiased">
+        <MouseGlow />
         <Providers>
           {children}
         </Providers>

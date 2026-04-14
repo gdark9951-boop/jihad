@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search,
@@ -27,17 +27,17 @@ export default function UserSearchModal({
   const [searchResults, setSearchResults] = useState<User[]>([]);
   const { user: currentUser } = useUser();
 
-  const handleSearch = async (query: string) => {
-    setSearchQuery(query);
+  const handleSearch = useCallback(async (searchVal: string) => {
+    setSearchQuery(searchVal);
 
-    if (query.trim() === "") {
+    if (searchVal.trim() === "") {
       setSearchResults([]);
       return;
     }
 
     try {
-      // ✅ البحث في قاعدة بيانات Supabase
-      const { supabase } = await import("@/lib/supabase");
+      const { db } = await import("@/lib/firebase");
+      const { collection, query: fsQuery, where, getDocs, limit: fireLimit } = await import("firebase/firestore");
 
       // تحديد نوع المستخدمين المطلوب البحث عنهم
       let targetRole: string;
@@ -49,30 +49,39 @@ export default function UserSearchModal({
         targetRole = "student"; // افتراضياً
       }
 
-      const { data, error } = await supabase
-        .from("users")
-        .select("*")
-        .eq("user_type", targetRole)
-        .neq("id", currentUser?.id || "") // استبعاد المستخدم الحالي
-        .or(`name.ilike.%${query}%,email.ilike.%${query}%`)
-        .limit(20);
+      const usersRef = collection(db, "users");
+      // ملاحظة: Firestore لا يدعم ilike بشكل مباشر، سنقوم بالبحث بالاسم الكامل أو الفلترة محلياً للبحث المرن
+      // للتبسيط الآن، سنبحث عن الدور المطلوب ونجلب عينة ثم نفلتر بالاسم
+      const q = fsQuery(
+        usersRef,
+        where("role", "==", targetRole),
+        fireLimit(50)
+      );
 
-      if (error) throw error;
+      const querySnapshot = await getDocs(q);
+      const allUsers: User[] = querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: data.id || doc.id,
+          name: data.name || "مستخدم",
+          email: data.email || "",
+          role: data.role as any
+        };
+      });
 
-      // تحويل البيانات للصيغة المطلوبة
-      const users: User[] = (data || []).map((u) => ({
-        id: u.id,
-        name: u.name,
-        email: u.email,
-        role: u.user_type as "student" | "professor" | "admin",
-      }));
+      // فلترة النتائج بناءً على البحث
+      const filtered = allUsers.filter(u => 
+        u.id !== currentUser?.id && 
+        (u.name.toLowerCase().includes(searchVal.toLowerCase()) || 
+         u.email.toLowerCase().includes(searchVal.toLowerCase()))
+      ).slice(0, 20);
 
-      setSearchResults(users);
+      setSearchResults(filtered);
     } catch (error) {
       console.error("Error searching users:", error);
       setSearchResults([]);
     }
-  };
+  }, [currentUser?.id]);
 
   const getRoleLabel = (role: string) => {
     switch (role) {
